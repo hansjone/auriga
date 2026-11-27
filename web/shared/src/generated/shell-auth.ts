@@ -1852,6 +1852,10 @@ export interface components {
       cursor?: string;
       /** @enum {string} */
       kind?: 'plugin' | 'skill' | 'tool';
+      page?: number;
+      search?: string;
+      /** @enum {string} */
+      sort?: 'publishedAt' | 'installationCount' | 'starCount' | 'name';
     };
     /** @description Shared plugin/skill. Server derives tenant and owner. Installation mode belongs to scoped assignments. Tool delivery remains gated; legacy IDs are not catalog IDs. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput: {
@@ -2742,6 +2746,8 @@ export interface components {
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage: {
       items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'][];
       nextCursor?: string;
+      /** @description Total matching packages when page mode is used. */
+      total?: number;
     };
     ShellAuthOutput_UnifiedListResourcePackages: {
       statusCode: number;

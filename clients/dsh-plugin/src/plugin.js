@@ -17,6 +17,7 @@ import {
 } from './local/routes.js';
 import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
+import { installShellUi } from './shell/host.js';
 import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 import { installObservability, logEvent } from './observability/index.js';
 import { installResourceChannel } from './resources/channel.js';
@@ -47,6 +48,17 @@ export async function apply(ctx, config) {
   // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
+  const localNativeAuth = {
+    requestRejection: (/** @type {any} */ req) =>
+      admission
+        ? admission.nativeAuth.requestRejection(req)
+        : ctx.connection.requestRejection(req),
+  };
+  installShellUi(
+    ctx,
+    config,
+    mode === 'managed' ? {} : { nativeAuth: localNativeAuth },
+  );
   const settings = installSettings(
     ctx,
     config,
@@ -61,12 +73,7 @@ export async function apply(ctx, config) {
           proxy: () => proxyController,
           broker: () => binding?.runtime.broker,
           networkControl: () => binding?.runtime.networkControl,
-          nativeAuth: {
-            requestRejection: (req) =>
-              admission
-                ? admission.nativeAuth.requestRejection(req)
-                : ctx.connection.requestRejection(req),
-          },
+          nativeAuth: localNativeAuth,
         },
   );
   if (mode !== 'managed') {

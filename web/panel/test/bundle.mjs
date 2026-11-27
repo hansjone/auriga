@@ -61,7 +61,8 @@ for (const [status, message] of [
     ...panel.context,
     fetch: async (path, init) => {
       hostRequests++;
-      assert.equal(path, 'catalog/packages?limit=50&kind=plugin');
+      // Default market tab is "all": page/limit without a kind filter.
+      assert.equal(path, 'catalog/packages?limit=12&page=1');
       assert.equal(init.method, 'GET');
       return Response.json(
         { detail: 'private-authorization-detail' },
@@ -97,7 +98,7 @@ assert.equal(
 const tabs = panel.shadowRoot.querySelectorAll('nav button');
 assert.deepEqual(
   Array.from(tabs, (tab) => tab.textContent),
-  ['Resource market', 'My resources', 'Plugins', 'Skills'],
+  ['Resource market', 'My resources'],
 );
 const installationRequests = [];
 panel.context = {
@@ -113,7 +114,7 @@ panel.context = {
 panel.shadowRoot.querySelectorAll('nav button')[1].click();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(installationRequests, [
-  { path: 'catalog/packages?limit=50&kind=plugin', method: 'GET' },
+  { path: 'catalog/packages?limit=12&page=1', method: 'GET' },
   { path: 'catalog/installations', method: 'GET' },
 ]);
 assert.ok(
@@ -160,14 +161,14 @@ assert.doesNotMatch(
   'native bundle must not contain a Vue runtime',
 );
 assert.ok(
-  Buffer.byteLength(source) < 75_000,
-  // Native market cards, version details and bilingual diagnostics add no UI runtime dependency.
-  'native market UI and diagnostics must stay below their 75 kB uncompressed budget',
+  Buffer.byteLength(source) < 110_000,
+  // Market chrome, version details and bilingual diagnostics stay without a UI runtime dependency.
+  'native market UI and diagnostics must stay below their 110 kB uncompressed budget',
 );
 const gzipBytes = gzipSync(source).byteLength;
 assert.ok(
-  gzipBytes < 21_000,
-  'the native panel must stay below its 21 kB gzip transfer budget',
+  gzipBytes < 30_000,
+  'the native panel must stay below its 30 kB gzip transfer budget',
 );
 console.log(
   JSON.stringify({

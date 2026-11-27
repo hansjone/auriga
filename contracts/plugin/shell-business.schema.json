@@ -2362,6 +2362,23 @@
             "skill",
             "tool"
           ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "search": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "publishedAt",
+            "installationCount",
+            "starCount",
+            "name"
+          ]
         }
       },
       "required": []
@@ -2381,6 +2398,11 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total matching packages when page mode is used."
         }
       },
       "required": [

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auriga 资源市场 · 本地假数据预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --dsw-alias-bg-layer-1: #f4f6f8;
+        --dsw-alias-bg-layer-2: #ffffff;
+        --dsw-alias-label-primary: #1a2332;
+        --dsw-alias-label-secondary: #5b6b7c;
+        --dsw-alias-border-l1: #d8dee6;
+        --dsw-alias-border-l2: #9db0c4;
+        --dsw-alias-interactive-bg-hover: #eef2f6;
+        --dsw-alias-state-business-primary: #2563a8;
+        --dsw-alias-button-main-bg: #2563a8;
+        --dsw-alias-button-main-bg-hover: #1e4f86;
+        --dsw-alias-button-main-label: #ffffff;
+        --dsw-alias-state-error-primary: #c0392b;
+        --dsw-focus-ring-color: #2563a8;
+        font-family:
+          'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+        background: #e8edf2;
+        color: var(--dsw-alias-label-primary);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+      }
+      .shell {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px 16px 40px;
+      }
+      .banner {
+        margin: 0 0 12px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #fff8e8;
+        border: 1px solid #f0d9a0;
+        color: #6a5418;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .frame {
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--dsw-alias-bg-layer-1);
+        box-shadow: 0 10px 28px rgb(26 35 50 / 6%);
+        min-height: 720px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <p class="banner">
+        本地假数据预览：仅用于查看资源市场卡片样式，不连真实后端。口令/安装操作为空操作。
+      </p>
+      <div class="frame">
+        <auriga-team-panel></auriga-team-panel>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

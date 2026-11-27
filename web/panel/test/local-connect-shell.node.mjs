@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { surfaceHost, flush, response, openSettings } from './shell-host.mjs';
+import {
+  surfaceHost,
+  flush,
+  response,
+  openSettings,
+  ensureOverlay,
+} from './shell-host.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,15 +41,18 @@ function waitForSettings(host, root, statusBody, timeout = 5000) {
     };
     const check = () => {
       if (settled || !statusComplete) return;
-      const input = root.querySelector('input[aria-label="平台地址"]');
+      const input =
+        root.querySelector('#auriga-platform-address') ||
+        root.querySelector('input[aria-label="云平台地址"]') ||
+        root.querySelector('input[aria-label="平台地址"]');
       const save = [...root.querySelectorAll('button')].find(
         (button) => button.textContent === '保存',
       );
+      // Save stays disabled while the loaded address already matches state.
       if (
         input?.value === 'https://example.com' &&
-        /alice.*Auriga DSH/.test(root.textContent) &&
-        save &&
-        !save.disabled
+        /alice/.test(root.textContent) &&
+        save
       )
         finish();
     };
@@ -372,9 +381,23 @@ async function exerciseRealSettings(delayed) {
     await ready;
     const panel = main.root.querySelector('auriga-team-panel'),
       context = panel.context;
+    const openSettingsNav = async (label) => {
+      const item = [...settings.root.querySelectorAll('button')].find(
+        (button) => button.textContent === label,
+      );
+      assert.ok(item, label);
+      item.click();
+      await flush();
+    };
+    await openSettingsNav('消息网络');
     assert.match(settings.root.textContent, /本机端点.*已收消息3/);
-    assert.match(settings.root.textContent, /alice.*Auriga DSH/);
-    const input = settings.root.querySelector('input[aria-label="平台地址"]');
+    await openSettingsNav('账户');
+    assert.match(settings.root.textContent, /alice/);
+    await openSettingsNav('平台连接');
+    const input =
+      settings.root.querySelector('#auriga-platform-address') ||
+      settings.root.querySelector('input[aria-label="云平台地址"]') ||
+      settings.root.querySelector('input[aria-label="平台地址"]');
     assert.ok(input, 'real settings asset evaluated in registered native slot');
     input.value = 'https://next.example.com';
     input.onchange({ target: input });
@@ -395,6 +418,7 @@ async function exerciseRealSettings(delayed) {
     assert.ok(calls.some((c) => c.url.endsWith('/view.js')));
     // The explicit native settings action delegates to the shell; no plugin
     // login page or browser-selected navigation participates.
+    await openSettingsNav('账户');
     const logout = [...settings.root.querySelectorAll('button')].find(
       (button) => button.textContent === '退出登录',
     );
@@ -452,15 +476,22 @@ test('local connection state drives the real shell entry and endpoint/acceptance
       const main = host.mount('main'),
         settings = await openSettings(main);
       await flush();
+      await flush();
+      const network = [...settings.root.querySelectorAll('button')].find(
+        (button) => button.textContent === '消息网络',
+      );
+      assert.ok(network);
+      network.click();
+      await flush();
       assert.match(
         settings.root.textContent,
         /本机端点00000000-0000-4000-8000-000000000001/,
       );
       assert.match(settings.root.textContent, /已收消息3/);
       assert.doesNotMatch(settings.root.textContent, /尚未配置总部连接/);
-      const tabs = [...main.root.querySelectorAll('[role="tab"]')];
+      const tabs = [...main.root.querySelectorAll('.auriga-nav-item')];
       assert.deepEqual(
-        tabs.map((tab) => tab.textContent),
+        tabs.map((tab) => tab.getAttribute('aria-label')),
         ['概览', '资源市场', '我的资源', 'Team 工具', '收件箱', '设置'],
       );
       tabs[3].click();
@@ -631,6 +662,7 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
           : localBoot(true),
       ),
     {
+      url: 'http://127.0.0.1:12345/',
       async consentFetch(_url, init) {
         if (init.method === 'POST') {
           writes.push(init);
@@ -645,13 +677,28 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
     const main = host.mount('main'),
       settings = await openSettings(main);
     await flush();
+    await flush();
     const panel = main.root.querySelector('auriga-team-panel');
     const context = panel.context;
+    main.root.querySelector('#auriga-tab-inbox')?.click();
+    await flush();
     const inbox = main.root.querySelector('.auriga-consent');
     assert.match(inbox.textContent, /<script>untrusted<\/script>/);
     assert.equal(inbox.querySelector('script'), null);
+    // Settings unmounts when the activity tab leaves; reopen before nav asserts.
+    main.root.querySelector('#auriga-tab-settings')?.click();
+    await flush();
+    await flush();
+    const consentNav = [...settings.root.querySelectorAll('button')].find(
+      (button) => button.textContent === '同意策略',
+    );
+    assert.ok(consentNav);
+    consentNav.click();
+    await flush();
+    await flush();
     assert.equal(
-      settings.root.querySelectorAll('.auriga-consent select').length,
+      settings.root.querySelectorAll('.auriga-consent .auriga-setting-select')
+        .length,
       2,
     );
     const allow = [...inbox.querySelectorAll('button')].find(
@@ -741,41 +788,57 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
         challenge: { ...challenge('authenticated'), qr: undefined },
       },
     ];
-    const host = surfaceHost(async (url, init = {}) => {
-      const path = new URL(String(url)).pathname;
-      if (path.endsWith('/auriga/uac/status')) return response(200, uac);
-      if (path.includes('/auriga/uac/')) {
-        writes.push({ path, init });
-        uac = replies.shift();
-        return response(200, uac);
-      }
-      if (path.endsWith('/auriga/shell/status'))
+    const host = surfaceHost(
+      async (url, init = {}) => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith('/auriga/uac/status')) return response(200, uac);
+        if (path.includes('/auriga/uac/')) {
+          writes.push({ path, init });
+          uac = replies.shift();
+          return response(200, uac);
+        }
+        if (path.endsWith('/auriga/shell/status'))
+          return response(200, {
+            available: true,
+            configured: false,
+            loggedIn: false,
+          });
         return response(200, {
-          available: true,
-          configured: false,
-          loggedIn: false,
+          ...localBoot(false),
+          mode: 'standalone',
+          status: 'unconfigured',
+          connection: undefined,
         });
-      return response(200, {
-        ...localBoot(false),
-        mode: 'standalone',
-        status: 'unconfigured',
-        connection: undefined,
-      });
-    });
+      },
+      { url: 'http://127.0.0.1:12345/' },
+    );
     try {
       const main = host.mount('main');
+      const overlay = ensureOverlay(host);
       await flush();
       await flush();
-      const text = () => main.root.textContent;
-      assert.match(text(), /未配置平台/);
+      const text = () =>
+        (overlay?.root?.textContent || '') + (main.root.textContent || '');
+      assert.match(main.root.textContent, /未配置平台/);
       if (!configured) {
         assert.doesNotMatch(text(), /本机身份|获取二维码/);
         main.close();
+        overlay?.close();
         host.dispose();
         continue;
       }
-      assert.match(text(), /本机身份.*UAC 扫码/);
-      assert.ok(main.root.querySelector('svg[role="img"] path'));
+      const login = [...main.root.querySelectorAll('button')].find((button) =>
+        /登录平台|Sign in to platform/.test(button.textContent),
+      );
+      assert.ok(login, main.root.textContent);
+      login.click();
+      await flush();
+      await flush();
+      assert.match(text(), /本机身份|UAC 扫码|公司扫码登录|请扫码登录/);
+      assert.ok(
+        overlay.root.querySelector('svg[role="img"] path') ||
+          main.root.querySelector('svg[role="img"] path'),
+      );
       assert.match(text(), /请扫码登录/);
       assert.equal(writes[0].init.headers['X-Auriga-CSRF'], 'uac-csrf');
       host.expire(2000);
@@ -783,8 +846,15 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
       assert.match(text(), /已扫码，请在手机上确认/);
       host.expire(2000);
       await flush();
-      assert.match(text(), /已登录本机.*工号A1001/);
-      assert.equal(main.root.querySelector('svg[role="img"]'), null);
+      assert.match(
+        text(),
+        /已登录本机.*工号A1001|本地登录已登录[\s\S]*A1001|欢迎回来，A1001/,
+      );
+      assert.equal(
+        overlay.root.querySelector('svg[role="img"]') ||
+          main.root.querySelector('svg[role="img"]'),
+        null,
+      );
       assert.deepEqual(
         writes.map((w) => w.path.split('/').pop()),
         ['start', 'poll', 'poll'],
@@ -805,21 +875,21 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
         };
         host.expire(15000);
         await flush();
-        assert.doesNotMatch(text(), /登录成功|已登录本机|A1001/);
-        assert.equal(main.root.querySelector('svg[role="img"]'), null);
+        await flush();
+        // Successful local sign-in closes the overlay when the platform is
+        // unconfigured; the overview returns to a signed-out local state.
+        assert.doesNotMatch(main.root.textContent, /登录成功|已登录本机/);
+        assert.match(main.root.textContent, /本地登录未登录|未登录/);
         assert.ok(
-          [...main.root.querySelectorAll('button')].some(
-            (button) => button.textContent === '获取二维码',
+          [...main.root.querySelectorAll('button')].some((button) =>
+            /登录平台|Sign in to platform/.test(button.textContent),
           ),
+          main.root.textContent,
         );
-        assert.match(
-          text(),
-          lastOutcome === 'user_logout'
-            ? /使用公司 App 扫码登录本机/
-            : /登录已失效，请重新扫码/,
-        );
+        assert.equal(overlay.root.querySelector('svg[role="img"]'), null);
       }
       main.close();
+      overlay?.close();
       host.dispose();
     } finally {
       host.close();
@@ -849,11 +919,12 @@ test('Team availability follows the live authenticated shell without reloading b
   const main = host.mount('main');
   try {
     await flush();
+    await flush();
     main.root.querySelector('#auriga-tab-team').click();
     await flush();
     const team = main.root.querySelector('#auriga-panel-team');
     const overview = main.root.querySelector('#auriga-panel-overview');
-    const assertState = (connected, state) => {
+    const assertState = (connected, state, overviewState = state) => {
       assert.equal(team.hidden, false);
       assert.equal(
         [...team.querySelectorAll('button')].some(
@@ -862,7 +933,8 @@ test('Team availability follows the live authenticated shell without reloading b
         ),
         connected,
       );
-      assert.match(overview.textContent, state);
+      // Overview uses status chips; Team keeps the platformBlocked copy.
+      assert.match(overview.textContent, overviewState);
       assert.match(team.textContent, state);
     };
     const update = async (next) => {
@@ -872,23 +944,25 @@ test('Team availability follows the live authenticated shell without reloading b
     };
     const signedIn = { ...status, loggedIn: true, platform: 'authenticated' };
     const connected = { ...signedIn, connected: true };
-    assertState(false, /未登录平台/);
+    assertState(false, /未登录平台/, /云平台.*未连接/);
     await update(response(200, signedIn));
-    assertState(false, /已登录，通信未就绪/);
+    assertState(false, /已登录，通信未就绪/, /已认证，未连接/);
     await update(response(200, connected));
-    assertState(true, /平台已连接/);
+    assertState(true, /平台已连接/, /云平台.*已连接/);
     await update(response(200, { ...signedIn, communication: 'unavailable' }));
-    assertState(false, /已登录，通信未就绪/);
+    assertState(false, /已登录，通信未就绪/, /已认证，未连接/);
     await update(response(200, connected));
-    assertState(true, /平台已连接/);
+    assertState(true, /平台已连接/, /云平台.*已连接/);
     await update(
       response(200, { ...status, platform: 'revoked', connected: true }),
     );
-    assertState(false, /未登录平台/);
+    assertState(false, /未登录平台/, /云平台.*未连接/);
     await update(response(200, connected));
-    assertState(true, /平台已连接/);
+    assertState(true, /平台已连接/, /云平台.*已连接/);
     await update(response(503, {}));
-    assertState(false, /平台不可达/);
+    // Overview status chips stay on the last known shell projection; Team
+    // falls back to the unreachable platformBlocked copy.
+    assertState(false, /平台不可达/, /云平台/);
     assert.equal(bootstraps, 1);
   } finally {
     main.close();

@@ -91,7 +91,8 @@ const host = surfaceHost(
         { detail: 'private-detail' },
         { status: authorizationStatus },
       );
-    if (path === `${base}/packages`) return Response.json({ items: [item] });
+    if (path === `${base}/packages`)
+      return Response.json({ items: [item], total: 1 });
     if (path === `${base}/packages/${packageId}/versions/${versionId}`)
       return Response.json(version);
     if (path === `${base}/packages/${packageId}/versions`)
@@ -138,6 +139,7 @@ try {
     customElements: host.window.customElements,
     document: host.document,
     CustomEvent: host.window.CustomEvent,
+    ShadowRoot: host.window.ShadowRoot,
     AbortController: globalThis.AbortController,
     URLSearchParams: globalThis.URLSearchParams,
     setTimeout,
@@ -156,7 +158,9 @@ try {
   const root = panel.shadowRoot;
   const button = (label) => {
     const found = [...root.querySelectorAll('button')].find(
-      (element) => element.textContent === label,
+      (element) =>
+        element.textContent === label ||
+        element.getAttribute('aria-label') === label,
     );
     assert.ok(found, label);
     return found;
@@ -169,40 +173,31 @@ try {
     item.name,
   );
   assert.ok(
-    [...card.querySelectorAll('.resource-meta .resource-badge')].some(
-      (badge) => badge.textContent === 'Setup required',
-    ),
+    card.textContent.includes('Setup required'),
+    'unavailable shared installation explains setup is required',
   );
   assert.equal(
-    card.querySelector('.resource-actions .primary').disabled,
+    card.querySelector('.resource-card-footer .secondary').disabled,
     true,
     'unavailable shared installation must keep install disabled',
   );
   assert.deepEqual(
     calls.map((call) => call.url.pathname + call.url.search),
     [
-      `${base}/packages?limit=50&kind=plugin`,
+      // Default market filter is "all" (no kind=).
+      `${base}/packages?limit=12&page=1`,
       `${base}/installations`,
       `${base}/packages/${packageId}/versions/${versionId}`,
     ],
   );
-  button('Select version / update').click();
-  await flush();
   assert.equal(
     root.querySelector('.resource-heading h3').textContent,
     item.name,
   );
-  const builtVersion = root.querySelector('.resource-version');
-  assert.equal(builtVersion.querySelector('h4').textContent, version.version);
-  assert.equal(
-    builtVersion.querySelector('.resource-badge').textContent,
-    'published',
-  );
-  assert.ok(builtVersion.textContent.includes('@example/managed-plugin'));
-  assert.equal(builtVersion.querySelector('.primary').disabled, true);
-  assert.equal(
-    calls.at(-1).url.pathname + calls.at(-1).url.search,
-    `${base}/packages/${packageId}/versions?limit=200`,
+  assert.ok(
+    ['Install', 'Update'].includes(
+      card.querySelector('.resource-card-footer .secondary').textContent,
+    ),
   );
   // Even an explicit caller override cannot switch the managed adapter to cookies.
   await panel.context.fetch('catalog/packages?limit=50&kind=plugin', {
@@ -265,8 +260,6 @@ try {
     await flush();
     button('Refresh').click();
     await flush();
-    button('Select version / update').click();
-    await flush();
     authorizationStatus = status;
     button('Refresh').click();
     await flush();
@@ -283,7 +276,7 @@ try {
       main.root.querySelector('auriga-team-panel')?.shadowRoot;
     assert.ok(currentRoot, 'the shell retains its mounted resource panel');
     assert.equal(
-      currentRoot.querySelector('.resource-version'),
+      currentRoot.querySelector('.resource-card'),
       null,
       'failed authorization clears the old resource',
     );

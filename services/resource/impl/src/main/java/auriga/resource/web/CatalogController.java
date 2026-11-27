@@ -36,8 +36,12 @@ public class CatalogController {
   public ResponseEntity<JsonNode> list(
       @RequestParam(required = false) String kind,
       @RequestParam(defaultValue = "50") int limit,
-      @RequestParam(required = false) String cursor) {
-    return response(workflow.list(actor(), null, kind, limit, cursor, null), 200);
+      @RequestParam(required = false) String cursor,
+      @RequestParam(required = false) Integer page,
+      @RequestParam(required = false) String search,
+      @RequestParam(required = false) String sort) {
+    return response(
+        workflow.list(actor(), null, kind, limit, cursor, null, page, search, sort), 200);
   }
 
   @PostMapping("/catalog/packages")
@@ -76,7 +80,7 @@ public class CatalogController {
       @PathVariable UUID p,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(required = false) String cursor) {
-    return response(workflow.list(actor(), p, null, limit, cursor, null), 200);
+    return response(workflow.list(actor(), p, null, limit, cursor, null, null, null, null), 200);
   }
 
   @GetMapping("/catalog/packages/{p}/versions/{v}")
@@ -156,7 +160,8 @@ public class CatalogController {
       @RequestParam(required = false) String kind,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(required = false) String cursor) {
-    return response(workflow.list(actor(), null, kind, limit, cursor, "review"), 200);
+    return response(
+        workflow.list(actor(), null, kind, limit, cursor, "review", null, null, null), 200);
   }
 
   @GetMapping("/admin/catalog/published")
@@ -166,7 +171,8 @@ public class CatalogController {
       @RequestParam(required = false) String kind,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(required = false) String cursor) {
-    return response(workflow.list(actor(), null, kind, limit, cursor, "published"), 200);
+    return response(
+        workflow.list(actor(), null, kind, limit, cursor, "published", null, null, null), 200);
   }
 
   @GetMapping("/admin/catalog/reviews/{id}")

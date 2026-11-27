@@ -5,7 +5,8 @@ export type PluginMarket = NonNullable<
 >;
 
 export type StarResult = Pick<PluginMarket, 'starred' | 'starCount'>;
-export type MarketSort = '' | 'publishedAt' | 'installationCount' | 'starCount';
+export type MarketSort =
+  '' | 'publishedAt' | 'installationCount' | 'starCount' | 'name';
 
 interface MarketPackage {
   id: string;
@@ -108,6 +109,8 @@ export function filterPlugins<T extends MarketPackage>(
           pack.name,
           market?.description ?? legacyDescription(pack),
           ...(market?.tags ?? []),
+          market ? marketAuthor(market) : undefined,
+          market ? marketDepartment(market) : undefined,
         ].some((text) => text?.toLowerCase().includes(query))) &&
       (!author || market?.authorId === author) &&
       (!department || (market && marketDepartment(market) === department)) &&
@@ -115,6 +118,8 @@ export function filterPlugins<T extends MarketPackage>(
     );
   });
   if (!sort) return result;
+  if (sort === 'name')
+    return result.sort((a, b) => a.name.localeCompare(b.name));
   const score = (pack: T) =>
     !pack.market
       ? -Infinity

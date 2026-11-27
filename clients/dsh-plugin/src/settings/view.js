@@ -1,8 +1,34 @@
-/* global AbortSignal, document */
+/* global AbortSignal */
 /** Native React settings. Status is supplied by the authenticated runtime. */
+import {
+  createSettingsUI,
+  readSettingsCategory,
+  writeSettingsCategory,
+} from './ui.js';
+
 const messages = {
   zh: {
+    navLabel: '设置分类',
+    navGeneral: '常规',
+    navMessaging: '消息与安全',
+    navAdvanced: '高级',
+    navAccount: '账户',
+    navPlatform: '平台连接',
+    navProxy: '网络代理',
+    navDesktop: '桌面更新',
+    navNetwork: '消息网络',
+    navConsent: '同意策略',
+    navSkills: '私有技能',
+    navDiagnostics: '诊断信息',
+    diagnosticsHint: '用于排查连接与运行状态的只读信息',
+    copy: '复制',
+    copyAll: '复制全部',
+    copied: '已复制',
+    copyFailed: '复制失败，请重试',
+    currentVersion: '当前版本',
     desktop: '桌面更新',
+    desktopProduct: 'Auriga DSH',
+    updatePreferences: '更新偏好',
     requiredUpdate:
       '此版本已低于最低可用版本，请完成更新并重启后继续使用平台功能。',
     downloadProgress: '正在下载',
@@ -10,16 +36,23 @@ const messages = {
     cancelUpdate: '取消下载（保留进度）',
     updatePaused: '下载已暂停，可继续下载',
     updateChannel: '更新渠道',
+    updateChannelHint: '切换渠道后将立即检查更新',
     stable: '正式',
     beta: '测试',
     desktopConfirmationRequired:
       '更新地址尚未明确确认。请使用平台地址、IP 模式及地址确认参数重新安装 Desktop。',
     update: '更新',
     checkUpdate: '检查更新',
-    autoCheck: '自动检查',
+    checkingUpdate: '正在检查…',
+    upToDate: '已是最新版本',
+    updateAvailable: '发现新版本',
+    awaitingInstall: '已下载，等待安装',
+    autoCheck: '自动检查更新',
+    autoCheckHint: '有可用更新时在客户端内提示',
     updateRestart: '下载后请关闭 Auriga DSH，退出时安装，下次启动使用新版。',
     platform: '平台',
-    address: '平台地址',
+    aurigaCloud: 'Auriga 云平台',
+    address: '云平台地址',
     save: '保存',
     test: '测试连接',
     saved: '已保存',
@@ -28,31 +61,43 @@ const messages = {
     configure: '填写平台地址',
     login: '登录',
     logout: '退出登录',
-    account: '账号',
-    identity: '成员',
+    account: '账户',
+    accountStatus: '账户状态',
+    identityInfo: '身份信息',
+    accountActions: '账户操作',
+    fullName: '姓名',
+    empNo: '工号',
     memberId: '成员 ID',
     department: '部门',
     device: '设备名',
     loginTime: '登录时间',
+    connect: '连接',
     signedOut: '未登录',
-    local: '平台功能暂不可用',
-    localIdentity: '本地身份',
+    local: '本地功能仍可用，云平台相关功能暂不可用',
+    localLogin: '本地登录',
     localSignedIn: '已登录',
+    localSignedOut: '未登录',
     localUnknown: '状态未知',
+    cloudConnection: '云平台连接',
     platformConnection: '平台连接',
     platformConnected: '已连接',
-    platformSignedIn: '已登录，连接不可用',
+    platformSignedIn: '已认证，未连接',
     platformDisconnected: '未连接',
-    loginEntryUnavailable: '登录界面暂未就绪，请在概览中重试。',
+    reconnect: '重新连接',
+    reauthenticate: '重新认证',
+    retryConnect: '重试连接',
+    loginEntryUnavailable: '登录弹层暂未就绪，请稍后重试。',
     managed: '系统托管',
     managedExpired: '实例会话已失效，请从门户重新进入',
     managedVerifying: '正在验证实例会话',
     memberLoading: '正在读取成员资料',
     networkTitle: '消息网络',
     controlFile: '公有控制包',
-    controlImport: '导入控制包',
+    controlImport: '导入',
+    controlPick: '选择 JSON 控制包…',
+    controlClear: '清除已选文件',
     controlSaved: '控制已保存；联网后自动提交确认。',
-    controlReceipt: '保存确认回执',
+    controlReceipt: '下载确认回执',
     controlMissing: '安装身份未配置，请联系管理员。',
     networkReady: '就绪',
     networkPending: '未就绪',
@@ -78,6 +123,8 @@ const messages = {
     receiveEmpty: '暂无已登记会话',
     receivePending: '设置待确认',
     receiveRetry: '重试',
+    receiveSearch: '搜索会话',
+    receiveEnabledCount: '已开启',
     unavailable: '状态服务不可用',
     auth: 'DSH 主人认证已失效',
     forbidden: 'DSH 拒绝访问',
@@ -107,11 +154,13 @@ const messages = {
     proxyModeDirect: '直连（不使用系统代理）',
     proxyModeCustom: '自定义代理',
     proxyGlobal: '全局代理地址',
-    proxyGlobalPlaceholder: 'http://127.0.0.1:7890（留空则仅按域名规则代理）',
+    proxyGlobalPlaceholder: 'http://127.0.0.1:7890',
+    proxyGlobalHint: '留空则仅按域名规则代理',
     proxyNoProxy: '全局直连（NoProxy）',
     proxyNoProxyPlaceholder: '*.corp.local, 192.0.2.0/24',
     proxyBuiltinNoProxy: '已内置强制直连：',
     proxyRules: '按域名分流规则',
+    proxyRulesEmpty: '暂无分流规则',
     proxyRulePattern: '域名 / 通配 / CIDR',
     proxyRuleAction: '策略',
     proxyRuleProxy: '走代理',
@@ -123,11 +172,18 @@ const messages = {
     proxyRuleDelete: '删除',
     proxyReset: '恢复默认',
     proxyResetDone: '已恢复默认代理配置',
+    proxyUnsaved: '有未保存的修改',
+    proxyTestTitle: '网络测试',
+    proxyTestHint:
+      '使用当前已生效的代理配置检测规则命中与连通性。未保存的修改不会参与测试。',
     proxyTestTarget: '测试目标',
     proxyTestPlaceholder: 'https://example.com 或域名',
-    proxyTestRun: '测试命中与连通',
+    proxyTestRun: '开始测试',
+    proxyTestRunning: '测试中…',
     proxyTestReachable: '可达',
     proxyTestUnreachable: '不可达',
+    proxyTestMatched: '命中',
+    proxyTestVia: '访问方式',
     invalidProxyUrl: '代理地址无效（仅支持 http:// 或 https://）',
     invalidPattern: '域名或 CIDR 规则格式无效',
     invalidTarget: '请输入有效的测试域名或 URL',
@@ -137,7 +193,28 @@ const messages = {
     tls_error: 'TLS 证书校验失败',
   },
   en: {
+    navLabel: 'Settings categories',
+    navGeneral: 'General',
+    navMessaging: 'Messaging & security',
+    navAdvanced: 'Advanced',
+    navAccount: 'Account',
+    navPlatform: 'Platform',
+    navProxy: 'Network proxy',
+    navDesktop: 'Desktop updates',
+    navNetwork: 'Message network',
+    navConsent: 'Consent policy',
+    navSkills: 'Private skills',
+    navDiagnostics: 'Diagnostics',
+    diagnosticsHint:
+      'Read-only details for connection and runtime troubleshooting',
+    copy: 'Copy',
+    copyAll: 'Copy all',
+    copied: 'Copied',
+    copyFailed: 'Copy failed. Please try again.',
+    currentVersion: 'Current version',
     desktop: 'Desktop updates',
+    desktopProduct: 'Auriga DSH',
+    updatePreferences: 'Update preferences',
     requiredUpdate:
       'This version is no longer supported. Update and restart to continue using platform features.',
     downloadProgress: 'Downloading',
@@ -146,17 +223,24 @@ const messages = {
     cancelUpdate: 'Cancel download (keep progress)',
     updatePaused: 'Download paused; resume when ready',
     updateChannel: 'Update channel',
+    updateChannelHint: 'Changing channel checks for updates immediately',
     stable: 'Stable',
     beta: 'Beta',
     desktopConfirmationRequired:
       'The update address needs confirmation. Reinstall Desktop with the platform address, IP mode and address confirmation parameters.',
     update: 'Update',
     checkUpdate: 'Check for updates',
-    autoCheck: 'Check automatically',
+    checkingUpdate: 'Checking…',
+    upToDate: 'You are up to date',
+    updateAvailable: 'Update available',
+    awaitingInstall: 'Downloaded — waiting to install',
+    autoCheck: 'Check for updates automatically',
+    autoCheckHint: 'Notify in the client when an update is available',
     updateRestart:
       'After download, close Auriga DSH to install. Reopen to use the new version.',
     platform: 'Platform',
-    address: 'Platform address',
+    aurigaCloud: 'Auriga Cloud',
+    address: 'Cloud platform address',
     save: 'Save',
     test: 'Test connection',
     saved: 'Saved',
@@ -166,30 +250,44 @@ const messages = {
     login: 'Sign in',
     logout: 'Sign out',
     account: 'Account',
-    identity: 'Member',
+    accountStatus: 'Account status',
+    identityInfo: 'Profile',
+    accountActions: 'Account actions',
+    fullName: 'Name',
+    empNo: 'Employee no.',
     memberId: 'Member ID',
     department: 'Department',
     device: 'Device name',
     loginTime: 'Sign-in time',
+    connect: 'Connect',
     signedOut: 'Signed out',
-    local: 'Platform features are unavailable',
-    localIdentity: 'Local identity',
+    local:
+      'Local features remain available; cloud features are temporarily unavailable',
+    localLogin: 'Local sign-in',
     localSignedIn: 'Signed in',
+    localSignedOut: 'Signed out',
     localUnknown: 'Status unknown',
+    cloudConnection: 'Cloud connection',
     platformConnection: 'Platform connection',
     platformConnected: 'Connected',
-    platformSignedIn: 'Signed in, connection unavailable',
+    platformSignedIn: 'Authenticated, not connected',
     platformDisconnected: 'Disconnected',
-    loginEntryUnavailable: 'Sign-in is not ready. Retry from Overview.',
+    reconnect: 'Reconnect',
+    reauthenticate: 'Reauthenticate',
+    retryConnect: 'Retry connection',
+    loginEntryUnavailable:
+      'Sign-in overlay is not ready. Please try again shortly.',
     managed: 'System managed',
     managedExpired: 'Instance session has expired. Re-enter from the portal.',
     managedVerifying: 'Verifying instance session',
     memberLoading: 'Loading member profile',
     networkTitle: 'Message network',
     controlFile: 'Public control package',
-    controlImport: 'Import control package',
+    controlImport: 'Import',
+    controlPick: 'Choose a JSON control package…',
+    controlClear: 'Clear selected file',
     controlSaved: 'Control saved. Confirmation will be sent when online.',
-    controlReceipt: 'Save installation receipt',
+    controlReceipt: 'Download confirmation receipt',
     controlMissing:
       'Installation identity is not configured. Contact your administrator.',
     networkReady: 'Ready',
@@ -216,6 +314,8 @@ const messages = {
     receiveEmpty: 'No registered sessions',
     receivePending: 'Awaiting confirmation',
     receiveRetry: 'Retry',
+    receiveSearch: 'Search sessions',
+    receiveEnabledCount: 'Enabled',
     unavailable: 'Status service unavailable',
     auth: 'DSH owner authentication expired',
     forbidden: 'DSH denied access',
@@ -246,11 +346,13 @@ const messages = {
     proxyModeDirect: 'Direct (ignore system proxy)',
     proxyModeCustom: 'Custom proxy',
     proxyGlobal: 'Global proxy URL',
-    proxyGlobalPlaceholder: 'http://127.0.0.1:7890 (empty = domain rules only)',
+    proxyGlobalPlaceholder: 'http://127.0.0.1:7890',
+    proxyGlobalHint: 'Leave empty to use domain rules only',
     proxyNoProxy: 'Global NoProxy',
     proxyNoProxyPlaceholder: '*.corp.local, 192.0.2.0/24',
     proxyBuiltinNoProxy: 'Always direct: ',
     proxyRules: 'Per-domain rules',
+    proxyRulesEmpty: 'No routing rules yet',
     proxyRulePattern: 'Domain / Wildcard / CIDR',
     proxyRuleAction: 'Action',
     proxyRuleProxy: 'Proxy',
@@ -262,11 +364,18 @@ const messages = {
     proxyRuleDelete: 'Remove',
     proxyReset: 'Reset to default',
     proxyResetDone: 'Proxy reset to default',
+    proxyUnsaved: 'Unsaved changes',
+    proxyTestTitle: 'Network test',
+    proxyTestHint:
+      'Tests rule matching and connectivity against the currently applied proxy configuration. Unsaved edits are not used.',
     proxyTestTarget: 'Test target',
     proxyTestPlaceholder: 'https://example.com or hostname',
-    proxyTestRun: 'Test route',
+    proxyTestRun: 'Start test',
+    proxyTestRunning: 'Testing…',
     proxyTestReachable: 'Reachable',
     proxyTestUnreachable: 'Unreachable',
+    proxyTestMatched: 'Matched',
+    proxyTestVia: 'Via',
     invalidProxyUrl: 'Invalid proxy URL (http:// or https:// only)',
     invalidPattern: 'Invalid domain or CIDR pattern',
     invalidTarget: 'Enter a valid target URL or hostname',
@@ -290,6 +399,46 @@ export function createSettingsView(
   },
 ) {
   const h = React.createElement;
+  const ui = createSettingsUI(React);
+  const {
+    SettingsLayout,
+    SettingsNavigation,
+    SettingsPanel,
+    SettingsSection,
+    SettingRow,
+    SettingSwitch,
+    SettingSelect,
+    SettingInput,
+    SettingFilePicker,
+    SettingAction,
+    SettingIconButton,
+    StatusIndicator,
+    SettingStatus,
+    SettingReadonly,
+    AccountCard,
+    PlatformCard,
+    PlatformAddressField,
+    SettingsCard,
+    DesktopSummaryCard,
+  } = ui;
+
+  /** Real session display name from messaging snapshot fields only. */
+  function sessionDisplayName(/** @type {any} */ session) {
+    for (const key of ['title', 'name', 'label', 'sessionId']) {
+      const value = session?.[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    if (typeof session?.local === 'string' && session.local.trim())
+      return session.local.trim();
+    return '';
+  }
+
+  function sessionEnabled(/** @type {any} */ session) {
+    if (typeof session?.enabled === 'boolean') return session.enabled;
+    if (typeof session?.receiveEnabled === 'boolean')
+      return session.receiveEnabled;
+    return false;
+  }
   const useRef = (/** @type {any} */ initial) =>
     typeof React.useRef === 'function'
       ? React.useRef(initial)
@@ -304,6 +453,7 @@ export function createSettingsView(
     const [sessions, setSessions] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState('');
+    const [query, setQuery] = React.useState('');
     const [refresh, reload] = React.useReducer(
       (/** @type {number} */ n) => n + 1,
       0,
@@ -360,38 +510,101 @@ export function createSettingsView(
         reload();
       }
     };
+
+    const list = sessions ?? [];
+    const needle = query.trim().toLowerCase();
+    const visible = needle
+      ? list.filter((/** @type {any} */ session) => {
+          const hay = [
+            sessionDisplayName(session),
+            session.local,
+            session.address,
+          ]
+            .filter((v) => typeof v === 'string' && v)
+            .join(' ')
+            .toLowerCase();
+          return hay.includes(needle);
+        })
+      : list;
+    const enabledCount = list.filter((/** @type {any} */ s) =>
+      sessionEnabled(s),
+    ).length;
+    const showTools = list.length > 8;
+
     return h(
-      'section',
-      null,
-      h('h3', null, t.receive),
-      h('p', null, t.receiveHint),
-      sessions?.length === 0 && h('p', null, t.receiveEmpty),
-      ...(sessions ?? []).map((/** @type {any} */ session) =>
+      SettingsCard,
+      {
+        icon: 'MessagesSquare',
+        title: t.receive,
+        description: t.receiveHint,
+      },
+      showTools &&
         h(
-          'label',
-          { key: session.local, style: { display: 'block' } },
-          h('input', {
-            type: 'checkbox',
-            checked: session.enabled,
-            disabled: busy || !account?.csrf || session.pending,
-            onChange: (/** @type {any} */ event) =>
-              writeReceive(session, event.target.checked),
+          'div',
+          { className: 'auriga-receive-toolbar' },
+          h(SettingInput, {
+            className: 'auriga-receive-search',
+            'aria-label': t.receiveSearch,
+            placeholder: t.receiveSearch,
+            value: query,
+            disabled: busy,
+            onChange: (/** @type {any} */ e) => setQuery(e.target.value),
           }),
-          ` ${session.sessionId} · ${session.address}`,
-          session.pending && ` · ${t.receivePending}`,
-          session.pending &&
-            h(
-              'button',
-              {
-                type: 'button',
-                disabled: busy || !account?.csrf,
-                onClick: () => writeReceive(session, session.pendingEnabled),
-              },
-              t.receiveRetry,
-            ),
+          h(
+            'span',
+            { className: 'auriga-receive-count' },
+            `${t.receiveEnabledCount} ${enabledCount}/${list.length}`,
+          ),
         ),
-      ),
-      error && h('p', { role: 'status' }, error),
+      list.length === 0 &&
+        h('p', { className: 'auriga-settings-card-empty' }, t.receiveEmpty),
+      list.length > 0 &&
+        h(
+          'div',
+          { className: 'auriga-receive-list' },
+          ...visible.map((/** @type {any} */ session) => {
+            const name = sessionDisplayName(session);
+            const address =
+              typeof session.address === 'string' && session.address
+                ? session.address
+                : '';
+            const description = [
+              address,
+              session.pending ? t.receivePending : '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            return h(SettingRow, {
+              key: session.local,
+              icon: 'MessageSquare',
+              label: name,
+              description: description || undefined,
+              control: h(
+                'div',
+                { className: 'auriga-setting-row-actions' },
+                h(SettingSwitch, {
+                  'aria-label': name || String(session.local ?? ''),
+                  checked: sessionEnabled(session),
+                  disabled: busy || !account?.csrf || session.pending,
+                  onChange: (/** @type {boolean} */ enabled) =>
+                    writeReceive(session, enabled),
+                }),
+                session.pending &&
+                  h(
+                    SettingAction,
+                    {
+                      compact: true,
+                      disabled: busy || !account?.csrf,
+                      onClick: () =>
+                        writeReceive(session, session.pendingEnabled),
+                    },
+                    t.receiveRetry,
+                  ),
+              ),
+            });
+          }),
+        ),
+      error && h(SettingStatus, { tone: 'error' }, error),
     );
   }
 
@@ -451,6 +664,651 @@ export function createSettingsView(
       throw new Error('invalidState');
     }
   }
+  function NetworkProxyView(
+    /** @type {{t:typeof messages.zh,proxy:any,busy:boolean,onSave:(payload:any)=>Promise<boolean>,onReset:()=>Promise<boolean>,onTest:(url:string)=>Promise<any>}} */ {
+      t,
+      proxy,
+      busy,
+      onSave,
+      onReset,
+      onTest,
+    },
+  ) {
+    const [mode, setMode] = React.useState(proxy.mode ?? 'direct');
+    const [globalProxy, setGlobalProxy] = React.useState(
+      proxy.globalProxy ?? '',
+    );
+    const [noProxyText, setNoProxyText] = React.useState(
+      (proxy.noProxy ?? []).join(', '),
+    );
+    const [rules, setRules] = React.useState(
+      (proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })),
+    );
+    const [dirty, setDirty] = React.useState(false);
+    const [testUrl, setTestUrl] = React.useState('');
+    const [testResult, setTestResult] = React.useState(null);
+    const [testing, setTesting] = React.useState(false);
+    const proxyFingerprint = JSON.stringify({
+      mode: proxy.mode ?? 'direct',
+      globalProxy: proxy.globalProxy ?? '',
+      noProxy: proxy.noProxy ?? [],
+      rules: proxy.rules ?? [],
+      source: proxy.source ?? '',
+    });
+    const lastSyncedRef = useRef(proxyFingerprint);
+    React.useEffect(() => {
+      if (dirty || proxyFingerprint === lastSyncedRef.current) return;
+      lastSyncedRef.current = proxyFingerprint;
+      setMode(proxy.mode ?? 'direct');
+      setGlobalProxy(proxy.globalProxy ?? '');
+      setNoProxyText((proxy.noProxy ?? []).join(', '));
+      setRules((proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })));
+    }, [proxyFingerprint, dirty, proxy]);
+
+    const updateRule = (
+      /** @type {number} */ idx,
+      /** @type {Record<string, any>} */ patch,
+    ) => {
+      setDirty(true);
+      setRules((/** @type {any[]} */ prev) =>
+        prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)),
+      );
+    };
+    const moveRule = (
+      /** @type {number} */ idx,
+      /** @type {number} */ delta,
+    ) => {
+      setDirty(true);
+      setRules((/** @type {any[]} */ prev) => {
+        const next = [...prev];
+        const target = idx + delta;
+        if (target < 0 || target >= next.length) return prev;
+        [next[idx], next[target]] = [next[target], next[idx]];
+        return next;
+      });
+    };
+    const removeRule = (/** @type {number} */ idx) => {
+      setDirty(true);
+      setRules((/** @type {any[]} */ prev) => prev.filter((_, i) => i !== idx));
+    };
+    const addRule = () => {
+      setDirty(true);
+      setRules((/** @type {any[]} */ prev) => [
+        ...prev,
+        {
+          id: 'rule-' + Date.now() + '-' + (prev.length + 1),
+          enabled: true,
+          pattern: '',
+          action: 'proxy',
+          proxy: '',
+        },
+      ]);
+    };
+
+    const buildPayload = () => ({
+      schemaVersion: 1,
+      mode,
+      globalProxy: globalProxy.trim(),
+      noProxy: noProxyText
+        .split(/[\n,]/)
+        .map((/** @type {string} */ s) => s.trim())
+        .filter(Boolean),
+      rules: rules.map((/** @type {any} */ r, /** @type {number} */ idx) => ({
+        id: r.id || `rule-${idx + 1}`,
+        enabled: r.enabled !== false,
+        pattern: String(r.pattern ?? '').trim(),
+        action: r.action === 'direct' ? 'direct' : 'proxy',
+        proxy: r.action === 'direct' ? '' : String(r.proxy ?? '').trim(),
+      })),
+    });
+
+    const sourceLabel =
+      proxy.source === 'user'
+        ? t.proxySourceUser
+        : proxy.source === 'bundled'
+          ? t.proxySourceBundled
+          : t.proxySourceBuiltin;
+    const canReset = proxy.source === 'user' || proxy.hasBundledDefault;
+    const PlusIcon = ui.icons.Plus;
+
+    const testStatus = testing
+      ? { tone: 'processing', label: t.proxyTestRunning }
+      : testResult
+        ? testResult.reachable
+          ? {
+              tone: 'success',
+              label: `${t.proxyTestReachable}${
+                testResult.latencyMs != null
+                  ? ` (${testResult.latencyMs}ms)`
+                  : ''
+              }`,
+            }
+          : {
+              tone: 'error',
+              label: `${t.proxyTestUnreachable}${
+                testResult.reason
+                  ? `: ${
+                      t[/** @type {keyof typeof t} */ (testResult.reason)] ??
+                      testResult.reason
+                    }`
+                  : ''
+              }`,
+            }
+        : null;
+
+    const testDetail = testResult
+      ? [
+          testResult.matchedBy
+            ? `${t.proxyTestMatched}: ${testResult.matchedBy}`
+            : null,
+          `${t.proxyTestVia}: ${
+            testResult.action === 'proxy'
+              ? testResult.proxy || t.proxyRuleProxy
+              : t.proxyRuleDirect
+          }`,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : '';
+
+    return h(
+      React.Fragment,
+      null,
+      h(
+        SettingsCard,
+        {
+          icon: 'Globe',
+          title: t.proxyTitle,
+          description: t.proxyHint,
+          status: h(StatusIndicator, {
+            tone: proxy.degraded ? 'warn' : 'idle',
+            label: sourceLabel,
+          }),
+          notice: proxy.degraded
+            ? h(SettingStatus, { tone: 'warn' }, t.proxyDegraded)
+            : null,
+          footer: dirty ? h('span', { role: 'status' }, t.proxyUnsaved) : null,
+          actions: [
+            canReset
+              ? h(
+                  SettingAction,
+                  {
+                    key: 'reset',
+                    disabled: busy,
+                    onClick: async () => {
+                      const reset = await onReset();
+                      if (reset) {
+                        lastSyncedRef.current = '';
+                        setDirty(false);
+                      }
+                    },
+                  },
+                  t.proxyReset,
+                )
+              : null,
+            h(
+              SettingAction,
+              {
+                key: 'save',
+                primary: true,
+                disabled: busy || !dirty,
+                onClick: async () => {
+                  const saved = await onSave(buildPayload());
+                  if (saved) {
+                    lastSyncedRef.current = '';
+                    setDirty(false);
+                  }
+                },
+              },
+              t.save,
+            ),
+          ],
+        },
+        h(SettingRow, {
+          label: t.proxyMode,
+          control: h(SettingSelect, {
+            'aria-label': t.proxyMode,
+            value: mode,
+            disabled: busy,
+            options: [
+              { value: 'direct', label: t.proxyModeDirect },
+              { value: 'proxy', label: t.proxyModeCustom },
+            ],
+            onChange: (/** @type {string} */ next) => {
+              setDirty(true);
+              setMode(next);
+            },
+          }),
+        }),
+        mode === 'proxy' &&
+          h(
+            React.Fragment,
+            null,
+            h(
+              'div',
+              { className: 'auriga-settings-card-group' },
+              h(
+                'div',
+                { className: 'auriga-settings-card-group-label' },
+                t.proxyGlobal,
+              ),
+              h(SettingInput, {
+                'aria-label': t.proxyGlobal,
+                value: globalProxy,
+                placeholder: t.proxyGlobalPlaceholder,
+                disabled: busy,
+                onChange: (/** @type {any} */ e) => {
+                  setDirty(true);
+                  setGlobalProxy(e.target.value);
+                },
+              }),
+              h(
+                'div',
+                { className: 'auriga-settings-card-group-hint' },
+                t.proxyGlobalHint,
+              ),
+            ),
+            h(
+              'div',
+              { className: 'auriga-settings-card-group' },
+              h(
+                'div',
+                { className: 'auriga-settings-card-group-label' },
+                t.proxyNoProxy,
+              ),
+              h(SettingInput, {
+                multiline: true,
+                rows: 2,
+                'aria-label': t.proxyNoProxy,
+                value: noProxyText,
+                placeholder: t.proxyNoProxyPlaceholder,
+                disabled: busy,
+                onChange: (/** @type {any} */ e) => {
+                  setDirty(true);
+                  setNoProxyText(e.target.value);
+                },
+              }),
+              h(
+                'div',
+                { className: 'auriga-settings-card-group-hint' },
+                t.proxyBuiltinNoProxy +
+                  (
+                    proxy.builtinNoProxy ?? ['localhost', '127.0.0.1', '::1']
+                  ).join(', '),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'auriga-settings-card-group-head' },
+              h(
+                'div',
+                { className: 'auriga-settings-card-group-label' },
+                t.proxyRules,
+              ),
+              h(
+                SettingAction,
+                {
+                  compact: true,
+                  quiet: true,
+                  disabled: busy,
+                  onClick: addRule,
+                },
+                PlusIcon
+                  ? h(PlusIcon, {
+                      size: 14,
+                      style: { marginInlineEnd: 4 },
+                    })
+                  : null,
+                t.proxyRuleAdd,
+              ),
+            ),
+            rules.length === 0
+              ? h(
+                  'p',
+                  { className: 'auriga-settings-card-empty' },
+                  t.proxyRulesEmpty,
+                )
+              : h(
+                  'div',
+                  { className: 'auriga-proxy-rules' },
+                  ...rules.map(
+                    (/** @type {any} */ rule, /** @type {number} */ idx) =>
+                      h(
+                        'div',
+                        {
+                          key: rule.id ?? idx,
+                          className: 'auriga-proxy-rule',
+                        },
+                        h(SettingSwitch, {
+                          'aria-label': t.proxyRulePattern,
+                          checked: rule.enabled !== false,
+                          disabled: busy,
+                          onChange: (/** @type {boolean} */ enabled) =>
+                            updateRule(idx, { enabled }),
+                        }),
+                        h(SettingInput, {
+                          'aria-label': t.proxyRulePattern,
+                          placeholder: t.proxyRulePattern,
+                          value: rule.pattern ?? '',
+                          disabled: busy,
+                          onChange: (/** @type {any} */ e) =>
+                            updateRule(idx, { pattern: e.target.value }),
+                        }),
+                        h(SettingSelect, {
+                          'aria-label': t.proxyRuleAction,
+                          value: rule.action === 'direct' ? 'direct' : 'proxy',
+                          disabled: busy,
+                          options: [
+                            { value: 'proxy', label: t.proxyRuleProxy },
+                            { value: 'direct', label: t.proxyRuleDirect },
+                          ],
+                          onChange: (/** @type {string} */ action) =>
+                            updateRule(idx, { action }),
+                        }),
+                        h(SettingInput, {
+                          'aria-label': t.proxyRuleTarget,
+                          placeholder: t.proxyRuleTarget,
+                          value:
+                            rule.action === 'direct' ? '' : (rule.proxy ?? ''),
+                          disabled: busy || rule.action === 'direct',
+                          onChange: (/** @type {any} */ e) =>
+                            updateRule(idx, { proxy: e.target.value }),
+                        }),
+                        h(
+                          SettingAction,
+                          {
+                            compact: true,
+                            quiet: true,
+                            disabled: busy || idx === 0,
+                            onClick: () => moveRule(idx, -1),
+                          },
+                          t.proxyRuleUp,
+                        ),
+                        h(
+                          SettingAction,
+                          {
+                            compact: true,
+                            quiet: true,
+                            disabled: busy || idx === rules.length - 1,
+                            onClick: () => moveRule(idx, 1),
+                          },
+                          t.proxyRuleDown,
+                        ),
+                        h(
+                          SettingAction,
+                          {
+                            compact: true,
+                            quiet: true,
+                            disabled: busy,
+                            onClick: () => removeRule(idx),
+                          },
+                          t.proxyRuleDelete,
+                        ),
+                      ),
+                  ),
+                ),
+          ),
+      ),
+      h(
+        SettingsCard,
+        {
+          icon: 'Activity',
+          title: t.proxyTestTitle,
+          description: t.proxyTestHint,
+        },
+        h(
+          'div',
+          { className: 'auriga-proxy-test-row' },
+          h(SettingInput, {
+            'aria-label': t.proxyTestTarget,
+            placeholder: t.proxyTestPlaceholder,
+            value: testUrl,
+            disabled: busy || testing,
+            onChange: (/** @type {any} */ e) => setTestUrl(e.target.value),
+          }),
+          h(
+            SettingAction,
+            {
+              primary: true,
+              disabled: busy || testing || !testUrl.trim(),
+              onClick: async () => {
+                setTesting(true);
+                setTestResult(null);
+                try {
+                  const res = await onTest(testUrl.trim());
+                  if (res) setTestResult(res);
+                } finally {
+                  setTesting(false);
+                }
+              },
+            },
+            t.proxyTestRun,
+          ),
+        ),
+        (testing || testResult) &&
+          h(
+            'div',
+            { className: 'auriga-proxy-test-result' },
+            testStatus
+              ? h(StatusIndicator, {
+                  tone: testStatus.tone,
+                  label: testStatus.label,
+                })
+              : null,
+            testDetail
+              ? h(
+                  'p',
+                  { className: 'auriga-proxy-test-result-detail' },
+                  testDetail,
+                )
+              : null,
+          ),
+      ),
+    );
+  }
+
+  function DesktopUpdateView(
+    /** @type {{t:typeof messages.zh,desktop:any,busy:boolean,currentVersion?:string,onCheck:()=>Promise<void>,onUpdate:()=>Promise<void>,onCancel:()=>Promise<void>,onToggleEnabled:(enabled:boolean)=>Promise<void>,onChangeChannel:(channel:string)=>Promise<void>}} */ {
+      t,
+      desktop,
+      busy,
+      currentVersion,
+      onCheck,
+      onUpdate,
+      onCancel,
+      onToggleEnabled,
+      onChangeChannel,
+    },
+  ) {
+    const [checkedFresh, setCheckedFresh] = React.useState(false);
+    const [checkingLocal, setCheckingLocal] = React.useState(false);
+    const availableVersion =
+      typeof desktop.available?.version === 'string'
+        ? desktop.available.version
+        : typeof desktop.available === 'string'
+          ? desktop.available
+          : '';
+    const downloading = !!desktop.downloading;
+    const restartRequired = !!desktop.restartRequired;
+    const checking =
+      checkingLocal ||
+      (!!desktop.busy && !downloading && !restartRequired && !availableVersion);
+    const hasUpdate =
+      !!availableVersion && !restartRequired && !desktop.busy && !downloading;
+    const upToDate =
+      checkedFresh &&
+      !availableVersion &&
+      !restartRequired &&
+      !desktop.error &&
+      !downloading &&
+      !checking &&
+      desktop.phase !== 'cancelled';
+
+    React.useEffect(() => {
+      if (availableVersion || desktop.error || restartRequired)
+        setCheckedFresh(false);
+    }, [availableVersion, desktop.error, restartRequired]);
+
+    const runCheck = async () => {
+      setCheckingLocal(true);
+      try {
+        await onCheck();
+        setCheckedFresh(true);
+      } finally {
+        setCheckingLocal(false);
+      }
+    };
+
+    /** @type {any} */
+    let primaryAction = null;
+    if (!desktop.confirmationRequired) {
+      if (downloading || restartRequired) {
+        primaryAction = null;
+      } else if (hasUpdate) {
+        primaryAction = h(
+          SettingAction,
+          {
+            primary: true,
+            disabled: busy,
+            onClick: () => onUpdate(),
+          },
+          t.update,
+        );
+      } else if (checking) {
+        primaryAction = h(
+          SettingAction,
+          { primary: true, disabled: true },
+          t.checkingUpdate,
+        );
+      } else {
+        primaryAction = h(
+          SettingAction,
+          {
+            primary: true,
+            disabled: busy,
+            onClick: () => runCheck(),
+          },
+          t.checkUpdate,
+        );
+      }
+    }
+
+    const versionLabel = currentVersion
+      ? `${t.currentVersion} v${currentVersion}`
+      : null;
+
+    return h(
+      React.Fragment,
+      null,
+      h(
+        DesktopSummaryCard,
+        {
+          title: t.desktopProduct,
+          version: versionLabel,
+          action: primaryAction,
+          'aria-label': t.desktop,
+        },
+        desktop.confirmationRequired &&
+          h(SettingStatus, { tone: 'error' }, t.desktopConfirmationRequired),
+        desktop.required &&
+          h(SettingStatus, { tone: 'error' }, t.requiredUpdate),
+        checking &&
+          h(StatusIndicator, {
+            tone: 'processing',
+            label: t.checkingUpdate,
+          }),
+        upToDate &&
+          h(StatusIndicator, {
+            tone: 'success',
+            label: t.upToDate,
+          }),
+        hasUpdate &&
+          h(StatusIndicator, {
+            tone: 'warn',
+            label: availableVersion
+              ? `${t.updateAvailable} v${availableVersion}`
+              : t.updateAvailable,
+          }),
+        downloading &&
+          h(
+            'div',
+            { className: 'auriga-setting-progress', role: 'status' },
+            h(
+              'div',
+              { className: 'auriga-desktop-progress-meta' },
+              h(StatusIndicator, {
+                tone: 'processing',
+                label:
+                  t.downloadProgress +
+                  ' ' +
+                  (desktop.downloadedBytes / 1048576).toFixed(1) +
+                  ' / ' +
+                  (desktop.totalBytes / 1048576).toFixed(1) +
+                  ' MiB',
+              }),
+              h(
+                SettingAction,
+                {
+                  compact: true,
+                  disabled: busy,
+                  onClick: () => onCancel(),
+                },
+                t.cancelUpdate,
+              ),
+            ),
+            h('progress', {
+              max: desktop.totalBytes,
+              value: desktop.downloadedBytes,
+            }),
+          ),
+        desktop.phase === 'cancelled' &&
+          h(StatusIndicator, { tone: 'idle', label: t.updatePaused }),
+        desktop.error && h(SettingStatus, { tone: 'error' }, t.updateFailed),
+        restartRequired &&
+          h(StatusIndicator, {
+            tone: 'success',
+            label: t.awaitingInstall,
+          }),
+        (availableVersion || downloading || restartRequired) &&
+          h(SettingStatus, null, t.updateRestart),
+      ),
+      h(
+        SettingsCard,
+        {
+          icon: 'Settings2',
+          title: t.updatePreferences,
+        },
+        h(SettingRow, {
+          label: t.autoCheck,
+          description: t.autoCheckHint,
+          control: h(SettingSwitch, {
+            'aria-label': t.autoCheck,
+            checked: !!desktop.enabled,
+            disabled: busy || desktop.confirmationRequired || desktop.required,
+            onChange: (/** @type {boolean} */ enabled) =>
+              onToggleEnabled(enabled),
+          }),
+        }),
+        h(SettingRow, {
+          label: t.updateChannel,
+          description: t.updateChannelHint,
+          control: h(SettingSelect, {
+            'aria-label': t.updateChannel,
+            value: desktop.channel ?? 'stable',
+            disabled:
+              busy || downloading || desktop.required || restartRequired,
+            options: [
+              { value: 'stable', label: t.stable },
+              { value: 'beta', label: t.beta },
+            ],
+            onChange: (/** @type {string} */ channel) =>
+              onChangeChannel(channel),
+          }),
+        }),
+      ),
+    );
+  }
+
   function PrivateSkillsView(/** @type {{locale:string}} */ { locale }) {
     const zh = locale?.startsWith('zh');
     const t = zh
@@ -840,340 +1698,12 @@ export function createSettingsView(
     );
   }
 
-  function NetworkProxyView(
-    /** @type {{t:typeof messages.zh,proxy:any,busy:boolean,onSave:(payload:any)=>Promise<boolean>,onReset:()=>Promise<boolean>,onTest:(url:string)=>Promise<any>}} */ {
-      t,
-      proxy,
-      busy,
-      onSave,
-      onReset,
-      onTest,
-    },
-  ) {
-    const [mode, setMode] = React.useState(proxy.mode ?? 'direct');
-    const [globalProxy, setGlobalProxy] = React.useState(
-      proxy.globalProxy ?? '',
-    );
-    const [noProxyText, setNoProxyText] = React.useState(
-      (proxy.noProxy ?? []).join(', '),
-    );
-    const [rules, setRules] = React.useState(
-      (proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })),
-    );
-    const [dirty, setDirty] = React.useState(false);
-    const [testUrl, setTestUrl] = React.useState('');
-    const [testResult, setTestResult] = React.useState(null);
-    const proxyFingerprint = JSON.stringify({
-      mode: proxy.mode ?? 'direct',
-      globalProxy: proxy.globalProxy ?? '',
-      noProxy: proxy.noProxy ?? [],
-      rules: proxy.rules ?? [],
-      source: proxy.source ?? '',
-    });
-    const lastSyncedRef = useRef(proxyFingerprint);
-    React.useEffect(() => {
-      if (dirty || proxyFingerprint === lastSyncedRef.current) return;
-      lastSyncedRef.current = proxyFingerprint;
-      setMode(proxy.mode ?? 'direct');
-      setGlobalProxy(proxy.globalProxy ?? '');
-      setNoProxyText((proxy.noProxy ?? []).join(', '));
-      setRules((proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })));
-    }, [proxyFingerprint, dirty, proxy]);
-
-    const updateRule = (
-      /** @type {number} */ idx,
-      /** @type {Record<string, any>} */ patch,
-    ) => {
-      setDirty(true);
-      setRules((/** @type {any[]} */ prev) =>
-        prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)),
-      );
-    };
-    const moveRule = (
-      /** @type {number} */ idx,
-      /** @type {number} */ delta,
-    ) => {
-      setDirty(true);
-      setRules((/** @type {any[]} */ prev) => {
-        const next = [...prev];
-        const target = idx + delta;
-        if (target < 0 || target >= next.length) return prev;
-        [next[idx], next[target]] = [next[target], next[idx]];
-        return next;
-      });
-    };
-    const removeRule = (/** @type {number} */ idx) => {
-      setDirty(true);
-      setRules((/** @type {any[]} */ prev) => prev.filter((_, i) => i !== idx));
-    };
-    const addRule = () => {
-      setDirty(true);
-      setRules((/** @type {any[]} */ prev) => [
-        ...prev,
-        {
-          id: 'rule-' + Date.now() + '-' + (prev.length + 1),
-          enabled: true,
-          pattern: '',
-          action: 'proxy',
-          proxy: '',
-        },
-      ]);
-    };
-
-    const buildPayload = () => ({
-      schemaVersion: 1,
-      mode,
-      globalProxy: globalProxy.trim(),
-      noProxy: noProxyText
-        .split(/[\n,]/)
-        .map((/** @type {string} */ s) => s.trim())
-        .filter(Boolean),
-      rules: rules.map((/** @type {any} */ r, /** @type {number} */ idx) => ({
-        id: r.id || `rule-${idx + 1}`,
-        enabled: r.enabled !== false,
-        pattern: String(r.pattern ?? '').trim(),
-        action: r.action === 'direct' ? 'direct' : 'proxy',
-        proxy: r.action === 'direct' ? '' : String(r.proxy ?? '').trim(),
-      })),
-    });
-
-    const sourceLabel =
-      proxy.source === 'user'
-        ? t.proxySourceUser
-        : proxy.source === 'bundled'
-          ? t.proxySourceBundled
-          : t.proxySourceBuiltin;
-
-    return h(
-      'section',
-      { 'aria-label': t.proxyTitle },
-      h('h3', null, t.proxyTitle),
-      h('p', null, t.proxyHint),
-      h('p', { role: 'status' }, sourceLabel),
-      proxy.degraded && h('p', { role: 'alert' }, t.proxyDegraded),
-      h(
-        'label',
-        { className: 'auriga-setting' },
-        h('span', null, t.proxyMode),
-        h(
-          'select',
-          {
-            'aria-label': t.proxyMode,
-            value: mode,
-            disabled: busy,
-            onChange: (/** @type {any} */ e) => {
-              setDirty(true);
-              setMode(e.target.value);
-            },
-          },
-          h('option', { value: 'direct' }, t.proxyModeDirect),
-          h('option', { value: 'proxy' }, t.proxyModeCustom),
-        ),
-      ),
-      mode === 'proxy' &&
-        h(
-          React.Fragment,
-          null,
-          h(
-            'label',
-            { className: 'auriga-setting' },
-            h('span', null, t.proxyGlobal),
-            h('input', {
-              'aria-label': t.proxyGlobal,
-              value: globalProxy,
-              placeholder: t.proxyGlobalPlaceholder,
-              disabled: busy,
-              onChange: (/** @type {any} */ e) => {
-                setDirty(true);
-                setGlobalProxy(e.target.value);
-              },
-            }),
-          ),
-          h(
-            'label',
-            { className: 'auriga-setting' },
-            h('span', null, t.proxyNoProxy),
-            h('textarea', {
-              'aria-label': t.proxyNoProxy,
-              rows: 2,
-              value: noProxyText,
-              placeholder: t.proxyNoProxyPlaceholder,
-              disabled: busy,
-              onChange: (/** @type {any} */ e) => {
-                setDirty(true);
-                setNoProxyText(e.target.value);
-              },
-            }),
-          ),
-          h(
-            'p',
-            null,
-            t.proxyBuiltinNoProxy +
-              (proxy.builtinNoProxy ?? ['localhost', '127.0.0.1', '::1']).join(
-                ', ',
-              ),
-          ),
-          h('h4', null, t.proxyRules),
-          ...rules.map((/** @type {any} */ rule, /** @type {number} */ idx) =>
-            h(
-              'div',
-              { key: rule.id ?? idx, className: 'auriga-proxy-rule' },
-              h('input', {
-                type: 'checkbox',
-                checked: rule.enabled !== false,
-                disabled: busy,
-                onChange: (/** @type {any} */ e) =>
-                  updateRule(idx, { enabled: e.target.checked }),
-              }),
-              h('input', {
-                'aria-label': t.proxyRulePattern,
-                placeholder: t.proxyRulePattern,
-                value: rule.pattern ?? '',
-                disabled: busy,
-                onChange: (/** @type {any} */ e) =>
-                  updateRule(idx, { pattern: e.target.value }),
-              }),
-              h(
-                'select',
-                {
-                  'aria-label': t.proxyRuleAction,
-                  value: rule.action === 'direct' ? 'direct' : 'proxy',
-                  disabled: busy,
-                  onChange: (/** @type {any} */ e) =>
-                    updateRule(idx, { action: e.target.value }),
-                },
-                h('option', { value: 'proxy' }, t.proxyRuleProxy),
-                h('option', { value: 'direct' }, t.proxyRuleDirect),
-              ),
-              h('input', {
-                'aria-label': t.proxyRuleTarget,
-                placeholder: t.proxyRuleTarget,
-                value: rule.action === 'direct' ? '' : (rule.proxy ?? ''),
-                disabled: busy || rule.action === 'direct',
-                onChange: (/** @type {any} */ e) =>
-                  updateRule(idx, { proxy: e.target.value }),
-              }),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  disabled: busy || idx === 0,
-                  onClick: () => moveRule(idx, -1),
-                },
-                t.proxyRuleUp,
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  disabled: busy || idx === rules.length - 1,
-                  onClick: () => moveRule(idx, 1),
-                },
-                t.proxyRuleDown,
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  disabled: busy,
-                  onClick: () => removeRule(idx),
-                },
-                t.proxyRuleDelete,
-              ),
-            ),
-          ),
-          h(
-            'div',
-            { className: 'auriga-setting-actions' },
-            h(
-              'button',
-              { type: 'button', disabled: busy, onClick: addRule },
-              t.proxyRuleAdd,
-            ),
-          ),
-        ),
-      h(
-        'div',
-        { className: 'auriga-setting-actions' },
-        h(
-          'button',
-          {
-            type: 'button',
-            disabled: busy,
-            onClick: async () => {
-              const saved = await onSave(buildPayload());
-              if (saved) {
-                lastSyncedRef.current = '';
-                setDirty(false);
-              }
-            },
-          },
-          t.save,
-        ),
-        (proxy.source === 'user' || proxy.hasBundledDefault) &&
-          h(
-            'button',
-            {
-              type: 'button',
-              disabled: busy,
-              onClick: async () => {
-                const reset = await onReset();
-                if (reset) {
-                  lastSyncedRef.current = '';
-                  setDirty(false);
-                }
-              },
-            },
-            t.proxyReset,
-          ),
-      ),
-      h(
-        'div',
-        { className: 'auriga-setting-actions' },
-        h('input', {
-          'aria-label': t.proxyTestTarget,
-          placeholder: t.proxyTestPlaceholder,
-          value: testUrl,
-          disabled: busy,
-          onChange: (/** @type {any} */ e) => setTestUrl(e.target.value),
-        }),
-        h(
-          'button',
-          {
-            type: 'button',
-            disabled: busy || !testUrl.trim(),
-            onClick: async () => {
-              const res = await onTest(testUrl.trim());
-              if (res) setTestResult(res);
-            },
-          },
-          t.proxyTestRun,
-        ),
-      ),
-      testResult &&
-        h(
-          'p',
-          { role: 'status' },
-          `${testResult.matchedBy} → ${
-            testResult.action === 'proxy' ? testResult.proxy : t.proxyRuleDirect
-          } · ${
-            testResult.reachable
-              ? `${t.proxyTestReachable} (${testResult.latencyMs}ms)`
-              : `${t.proxyTestUnreachable}: ${
-                  t[/** @type {keyof typeof t} */ (testResult.reason)] ??
-                  testResult.reason
-                }`
-          }`,
-        ),
-    );
-  }
-
   return function SettingsView(
     /** @type {{locale:string,boot?:any,consent?:any,gotoOverview?:()=>void}} */ {
       locale,
       boot,
       consent,
-      gotoOverview,
+      gotoOverview: _gotoOverview,
     },
   ) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
@@ -1184,6 +1714,9 @@ export function createSettingsView(
       [notice, setNotice] = React.useState(''),
       [statusError, setStatusError] = React.useState('');
     const [controlText, setControlText] = React.useState('');
+    const [controlFile, setControlFile] = React.useState(
+      /** @type {File|null} */ (null),
+    );
     const [controlReceipt, setControlReceipt] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
     const [revision, reload] = React.useReducer(
@@ -1377,7 +1910,7 @@ export function createSettingsView(
           : managed
             ? t.managed +
               ' · ' +
-              t.identity +
+              t.fullName +
               ' ' +
               name +
               ' · ' +
@@ -1391,7 +1924,7 @@ export function createSettingsView(
             : name + ' · ' + t.networkTitle + ' ' + networkText);
     const summary =
       !managed && localSignedIn
-        ? t.localIdentity +
+        ? t.fullName +
           '：' +
           localName +
           '；' +
@@ -1399,63 +1932,38 @@ export function createSettingsView(
           '：' +
           platformConnection
         : platformSummary;
-    const row = (/** @type {string} */ label, /** @type {any} */ value) =>
-      h(
-        'div',
-        { className: 'auriga-setting' },
-        h('span', null, label),
-        h('span', { className: 'auriga-setting-value' }, value),
-      );
-    const button = (
-      /** @type {string} */ label,
-      /** @type {()=>any} */ action,
-      disabled = false,
-    ) =>
-      h(
-        'button',
-        { type: 'button', disabled: busy || disabled, onClick: action },
-        label,
-      );
+    const [category, setCategoryState] = React.useState(() =>
+      readSettingsCategory('account'),
+    );
+    const setCategory = (/** @type {string} */ id) => {
+      setCategoryState(id);
+      writeSettingsCategory(id);
+    };
+    const [copyNotice, setCopyNotice] = React.useState('');
+    const [copiedKey, setCopiedKey] = React.useState('');
     const shellCommand = async (/** @type {string} */ action) => {
       await call('auriga/shell/command', { action }, { csrf: account?.csrf });
       await reload();
     };
     const enter = () =>
       run(async () => {
-        if (openLogin) {
-          if (!openLogin()) {
-            setNotice(t.loginEntryUnavailable);
-            gotoOverview?.();
-          }
+        if (!openLogin || !openLogin()) {
+          setNotice(t.loginEntryUnavailable);
           return;
         }
-        if (localUac?.available) {
-          gotoOverview?.();
-          return;
-        }
-        await shellCommand('inline_login');
-        gotoOverview?.();
       });
-    const action =
-      !managed && localUac?.available && !localSignedIn
-        ? button(t.login, enter)
-        : statusError
-          ? button(t.retry, reload)
-          : managed
-            ? button(t.refresh, reload)
-            : !configured
-              ? button(t.configure, () =>
-                  document
-                    .querySelector(
-                      /** @type {string} */ ('#auriga-platform-address'),
-                    )
-                    ?.scrollIntoView({ block: 'center' }),
-                )
-              : recovering
-                ? button(t.retry, reload)
-                : !loggedIn
-                  ? button(t.login, enter)
-                  : button(t.refresh, reload);
+    const retryLocalConnect = () =>
+      run(async () => {
+        await shellCommand('retry_local_uac');
+      });
+    const goConfigure = () => {
+      setCategory('platform');
+      queueMicrotask(() =>
+        document
+          .querySelector('#auriga-platform-address')
+          ?.scrollIntoView({ block: 'center' }),
+      );
+    };
     const logout = () =>
       run(async () => {
         const tasks = [];
@@ -1474,363 +1982,816 @@ export function createSettingsView(
         const failed = results.find((result) => result.status === 'rejected');
         if (failed?.status === 'rejected') throw failed.reason;
       });
-    const receiveControls = useReceiveSettings({ t, account, revision });
-    return h(
-      'div',
-      { className: 'auriga-settings-content' },
-      h(
-        'section',
-        { className: 'auriga-status-card', 'aria-label': 'Auriga DSH status' },
-        h('p', { role: 'status' }, summary),
-        !managed && (!loggedIn || !ready) && h('p', null, t.local),
-        action,
-      ),
-      h(
-        'section',
-        { 'aria-label': t.account },
-        h('h3', null, t.account),
-        row(
-          t.identity,
-          managed
-            ? name
-            : localName ||
-                statusError ||
-                (loggedIn || recovering
-                  ? name
-                  : !account
-                    ? t.localUnknown
-                    : t.signedOut),
-        ),
-        !managed &&
-          localUac?.available !== false &&
-          row(
-            t.localIdentity,
-            localSignedIn
-              ? localName
-              : localUac?.state === 'signed_out' && !localUac.reason
-                ? t.signedOut
-                : t.localUnknown,
-          ),
-        !managed && row(t.platformConnection, platformConnection),
-        !managed &&
-          localSignedIn &&
-          localUac.department &&
-          row(t.department, localUac.department),
-        managed
-          ? h('p', null, t.managed)
-          : h(
-              'div',
-              null,
-              (loggedIn || recovering) &&
-                (account.deviceName ?? state?.deviceName) &&
-                row(t.device, account.deviceName ?? state?.deviceName),
-              account?.uacLoginInfo?.status === 'available' &&
-                row(t.department, account.uacLoginInfo.department),
-              (loggedIn || recovering) &&
-                account.loginTime &&
-                row(
-                  t.loginTime,
-                  new Date(account.loginTime).toLocaleString(locale),
-                ),
-              // Sign-in lives on the status card above; only sign-out here.
-              (localSignedIn || (!statusError && loggedIn)) &&
-                button(t.logout, logout),
-            ),
-      ),
-      !managed &&
-        state?.desktop &&
-        h(
-          'section',
-          null,
-          h('h3', null, t.desktop),
-          state.desktop.confirmationRequired &&
-            h('p', { role: 'alert' }, t.desktopConfirmationRequired),
-          h(
-            'label',
-            { className: 'auriga-setting' },
-            h('span', null, t.autoCheck),
-            h('input', {
-              type: 'checkbox',
-              checked: state.desktop.enabled,
-              disabled:
-                busy ||
-                state.desktop.confirmationRequired ||
-                state.desktop.required,
-              onChange: (/** @type {any} */ e) =>
-                run(async () => {
-                  await call('auriga/settings/desktop', {
-                    enabled: e.target.checked,
-                  });
-                  await readState();
-                }),
-            }),
-          ),
-          state.desktop.required && h('p', { role: 'alert' }, t.requiredUpdate),
-          h(
-            'label',
-            { className: 'auriga-setting' },
-            h('span', null, t.updateChannel),
-            h(
-              'select',
+    const localTone = localSignedIn
+      ? 'success'
+      : localUac?.available === false
+        ? 'idle'
+        : localUac?.available
+          ? 'idle'
+          : 'idle';
+    const localStatusLabel = localSignedIn
+      ? t.localSignedIn
+      : localUac?.available === false
+        ? t.localUnknown
+        : localUac?.available
+          ? t.localSignedOut
+          : t.localUnknown;
+    const localAction =
+      !managed && localUac?.available && !localSignedIn
+        ? h(
+            SettingAction,
+            { compact: true, disabled: busy, onClick: enter },
+            t.login,
+          )
+        : !managed && localSignedIn
+          ? h(
+              SettingAction,
               {
-                value: state.desktop.channel ?? 'stable',
-                disabled:
-                  busy ||
-                  state.desktop.downloading ||
-                  state.desktop.required ||
-                  state.desktop.restartRequired,
-                onChange: (/** @type {any} */ e) =>
-                  run(async () => {
-                    await call('auriga/settings/desktop', {
-                      channel: e.target.value,
-                    });
-                    await call('auriga/settings/desktop', { action: 'check' });
-                    await readState();
-                  }),
+                danger: true,
+                compact: true,
+                disabled: busy,
+                onClick: logout,
               },
-              h('option', { value: 'stable' }, t.stable),
-              h('option', { value: 'beta' }, t.beta),
-            ),
-          ),
-          state.desktop.available &&
-            h('p', { role: 'status' }, state.desktop.available.version),
-          state.desktop.downloading &&
-            h(
-              'div',
-              { role: 'status' },
-              t.downloadProgress +
-                ' ' +
-                (state.desktop.downloadedBytes / 1048576).toFixed(1) +
-                ' / ' +
-                (state.desktop.totalBytes / 1048576).toFixed(1) +
-                ' MiB',
-              h('progress', {
-                max: state.desktop.totalBytes,
-                value: state.desktop.downloadedBytes,
-              }),
-              button(t.cancelUpdate, () =>
-                run(async () => {
-                  await call('auriga/settings/desktop', { action: 'cancel' });
-                  await readState();
-                }),
-              ),
-            ),
-          state.desktop.phase === 'cancelled' && h('p', null, t.updatePaused),
-          state.desktop.error && h('p', { role: 'alert' }, t.updateFailed),
-          (state.desktop.available || state.desktop.downloading) &&
-            !state.desktop.restartRequired &&
-            h('p', null, t.updateRestart),
-          h(
-            'div',
-            { className: 'auriga-setting-actions' },
-            !state.desktop.confirmationRequired &&
-              button(t.checkUpdate, () =>
-                run(async () => {
-                  await call('auriga/settings/desktop', { action: 'check' });
-                  await readState();
-                }),
-              ),
-            state.desktop.available &&
-              !state.desktop.restartRequired &&
-              !state.desktop.busy &&
-              button(t.update, () =>
-                run(async () => {
-                  // The runtime bounds transfer idle time. A status-read deadline
-                  // must not cancel a healthy package download before it queues.
-                  await call(
-                    'auriga/settings/desktop',
-                    { action: 'update' },
-                    { timeoutMs: null },
-                  );
-                  await readState();
-                }),
-              ),
-          ),
-          state.desktop.restartRequired &&
-            h('p', { role: 'status' }, t.updateRestart),
-        ),
+              t.logout,
+            )
+          : null;
+    const needsReauth =
+      !loggedIn && account?.models?.reauthenticationRequired === true;
+    const cloudTone = managed
+      ? managedFailure || statusError
+        ? 'error'
+        : loggedIn && account?.connected
+          ? 'success'
+          : !account || statusError
+            ? 'processing'
+            : loggedIn
+              ? 'warn'
+              : 'idle'
+      : statusError
+        ? 'error'
+        : recovering ||
+            ['connecting', 'registering', 'joining'].includes(network?.state)
+          ? 'processing'
+          : loggedIn && account?.connected
+            ? 'success'
+            : loggedIn
+              ? 'warn'
+              : needsReauth
+                ? 'error'
+                : 'idle';
+    const cloudStatusLabel = managed
+      ? managedFailure || statusError
+        ? t.managedExpired
+        : !account && !statusError
+          ? t.managedVerifying
+          : loggedIn && account?.connected
+            ? t.platformConnected
+            : loggedIn
+              ? t.platformSignedIn
+              : t.platformDisconnected
+      : statusError
+        ? statusError
+        : !account
+          ? t.localUnknown
+          : recovering
+            ? t.recovering
+            : loggedIn
+              ? account.connected
+                ? t.platformConnected
+                : t.platformSignedIn
+              : needsReauth
+                ? t.expired
+                : t.platformDisconnected;
+    const canRetryWithLocal =
+      localSignedIn &&
+      (!loggedIn || account?.canRetryLocalUac === true || needsReauth);
+    const cloudAction = managed
+      ? null
+      : statusError
+        ? h(
+            SettingAction,
+            { compact: true, disabled: busy, onClick: reload },
+            t.retry,
+          )
+        : !configured
+          ? h(
+              SettingAction,
+              { compact: true, disabled: busy, onClick: goConfigure },
+              t.configure,
+            )
+          : recovering
+            ? h(
+                SettingAction,
+                { compact: true, disabled: busy, onClick: reload },
+                t.reconnect,
+              )
+            : canRetryWithLocal
+              ? h(
+                  SettingAction,
+                  {
+                    compact: true,
+                    disabled: busy,
+                    onClick: retryLocalConnect,
+                  },
+                  t.retryConnect,
+                )
+              : needsReauth
+                ? h(
+                    SettingAction,
+                    { compact: true, disabled: busy, onClick: enter },
+                    t.reauthenticate,
+                  )
+                : !loggedIn
+                  ? h(
+                      SettingAction,
+                      { compact: true, disabled: busy, onClick: enter },
+                      t.connect,
+                    )
+                  : loggedIn && !account?.connected
+                    ? h(
+                        SettingAction,
+                        { compact: true, disabled: busy, onClick: reload },
+                        t.reconnect,
+                      )
+                    : !localSignedIn
+                      ? h(
+                          SettingAction,
+                          {
+                            danger: true,
+                            compact: true,
+                            disabled: busy,
+                            onClick: logout,
+                          },
+                          t.logout,
+                        )
+                      : null;
+    const cloudDescription =
       !managed &&
-        h(
-          'section',
-          { 'aria-label': t.platform },
-          h('h3', null, t.platform),
-          h(
-            'label',
-            { className: 'auriga-setting' },
-            h('span', null, t.address),
-            h('input', {
-              id: 'auriga-platform-address',
-              'aria-label': t.address,
-              value: address,
-              disabled: busy || !state,
-              onChange: (/** @type {any} */ event) =>
-                setAddress(event.target.value),
-            }),
-          ),
-          h(
-            'div',
-            { className: 'auriga-setting-actions' },
-            button(
-              t.test,
-              () =>
-                run(async () => {
-                  const result = await call('auriga/settings/test', {
-                    platformOrigin: address,
-                  });
-                  setNotice(
-                    result.reachable
-                      ? t.reachable
-                      : result.reason === 'http'
-                        ? t.http + result.status
-                        : (t[/** @type {keyof typeof t} */ (result.reason)] ??
-                          t.unavailable),
-                  );
-                }),
-              !address.trim(),
-            ),
-            button(
-              t.save,
-              () =>
-                run(async () => {
-                  try {
-                    await call('auriga/settings/save', {
-                      platformOrigin: address,
-                      deployment: state?.deployment ?? 'local',
-                    });
-                  } finally {
-                    await readState();
-                  }
-                  setNotice(t.saved);
-                }),
-              !state,
-            ),
-          ),
-          state &&
-            state.platformOrigin !== state.activeOrigin &&
-            h('p', null, t.pending),
-        ),
-      !managed &&
-        state?.proxy &&
-        h(NetworkProxyView, {
-          t,
-          proxy: state.proxy,
-          busy,
-          onSave: async (/** @type {any} */ payload) => {
-            let ok = false;
-            writeInFlightRef.current += 1;
-            try {
-              await run(async () => {
-                const next = await call('auriga/settings/proxy', payload);
-                stateSeqRef.current += 1;
-                setState(next);
-                setNotice(t.saved);
-                ok = true;
-              });
-            } finally {
-              writeInFlightRef.current -= 1;
-            }
-            return ok;
-          },
-          onReset: async () => {
-            let ok = false;
-            writeInFlightRef.current += 1;
-            try {
-              await run(async () => {
-                const next = await call('auriga/settings/proxy/reset', {});
-                stateSeqRef.current += 1;
-                setState(next);
-                setNotice(t.proxyResetDone);
-                ok = true;
-              });
-            } finally {
-              writeInFlightRef.current -= 1;
-            }
-            return ok;
-          },
-          onTest: async (/** @type {string} */ url) => {
-            let result = null;
-            await run(async () => {
-              result = await call('auriga/settings/proxy/test', { url });
-            });
-            return result;
-          },
+      (localSignedIn || loggedIn) &&
+      (!!statusError || !loggedIn || !account?.connected)
+        ? t.local
+        : undefined;
+    const connectionTone = cloudTone;
+    const platformConnectionLabel = cloudStatusLabel;
+    const receiveControls = useReceiveSettings({ t, account, revision });
+    const showConsent =
+      loggedIn && account?.capabilities?.consent === true && consent;
+    const showDesktop = !managed && !!state?.desktop;
+    const showPlatform = !managed;
+    const showProxy = !managed && !!state?.proxy;
+    const identityValue = managed
+      ? name
+      : localName ||
+        statusError ||
+        (loggedIn || recovering
+          ? name
+          : !account
+            ? t.localUnknown
+            : t.signedOut);
+    const displayName =
+      (managed ? name : localName || (loggedIn || recovering ? name : '')) ||
+      identityValue;
+    const department =
+      (!managed && localSignedIn && localUac.department) ||
+      (account?.uacLoginInfo?.status === 'available' &&
+        account.uacLoginInfo.department) ||
+      '';
+    const empNoValue =
+      (localSignedIn && localUac.empNo) ||
+      account?.account?.empNo ||
+      (account?.uacLoginInfo?.status === 'available' &&
+        account.uacLoginInfo.empNo) ||
+      '';
+    const profileName =
+      (localSignedIn && (localUac.displayName || localUac.empNo)) ||
+      account?.account?.displayName ||
+      (managed ? name : '') ||
+      '';
+    const initials = String(displayName || '?')
+      .trim()
+      .slice(0, 1)
+      .toUpperCase();
+    const memberSubject =
+      (loggedIn || recovering) && account?.account?.subject
+        ? String(account.account.subject)
+        : '';
+    const protocolValue =
+      boot?.protocol != null && String(boot.protocol) !== ''
+        ? String(boot.protocol)
+        : '';
+    const versionValue = boot?.pluginVersion ? String(boot.pluginVersion) : '';
+    const sourceValue = boot?.source ? String(boot.source) : '';
+    const reasonRaw = network?.reason ?? account?.communication;
+    const reasonValue =
+      reasonRaw != null && String(reasonRaw) !== '' ? String(reasonRaw) : '';
+    const modelTone = managed
+      ? 'idle'
+      : account?.models?.available
+        ? 'success'
+        : 'idle';
+    const diagnosticFields = [
+      {
+        key: 'memberId',
+        label: t.memberId,
+        value: memberSubject,
+      },
+      {
+        key: 'protocol',
+        label: t.protocol,
+        value: protocolValue,
+      },
+      {
+        key: 'version',
+        label: t.version,
+        value: versionValue,
+      },
+      {
+        key: 'source',
+        label: t.source,
+        value: sourceValue,
+      },
+      {
+        key: 'model',
+        label: t.model,
+        value: modelText,
+        provided: true,
+        status: h(StatusIndicator, {
+          tone: modelTone,
+          label: modelText,
         }),
+      },
+      {
+        key: 'reason',
+        label: t.reason,
+        value: reasonValue,
+      },
+    ].map((field) => {
+      const provided =
+        field.provided === true ||
+        (field.value != null && String(field.value) !== '');
+      return {
+        ...field,
+        provided,
+        display: provided ? field.value : t.notProvided,
+      };
+    });
+    /** @param {string} value @param {string} [key] */
+    const copyText = async (value, key) => {
+      try {
+        if (navigator.clipboard?.writeText)
+          await navigator.clipboard.writeText(value);
+        else {
+          const area = document.createElement('textarea');
+          area.value = value;
+          document.body.append(area);
+          area.select();
+          document.execCommand('copy');
+          area.remove();
+        }
+        setCopyNotice(t.copied);
+        if (key) {
+          setCopiedKey(key);
+          setTimeout(
+            () =>
+              setCopiedKey((/** @type {string} */ current) =>
+                current === key ? '' : current,
+              ),
+            1500,
+          );
+        }
+        setTimeout(() => setCopyNotice(''), 1500);
+      } catch {
+        setCopiedKey('');
+        setCopyNotice(t.copyFailed);
+        setTimeout(() => setCopyNotice(''), 1500);
+      }
+    };
+    const navGroups = [
+      {
+        id: 'general',
+        label: t.navGeneral,
+        items: [
+          { id: 'account', label: t.navAccount, icon: 'User' },
+          showPlatform && {
+            id: 'platform',
+            label: t.navPlatform,
+            icon: 'Link2',
+          },
+          showProxy && { id: 'proxy', label: t.navProxy, icon: 'Globe' },
+          showDesktop && {
+            id: 'desktop',
+            label: t.navDesktop,
+            icon: 'Download',
+          },
+          { id: 'skills', label: t.navSkills, icon: 'Package' },
+        ].filter(Boolean),
+      },
+      {
+        id: 'messaging',
+        label: t.navMessaging,
+        items: [
+          { id: 'network', label: t.navNetwork, icon: 'Radio' },
+          showConsent && {
+            id: 'consent',
+            label: t.navConsent,
+            icon: 'Shield',
+          },
+        ].filter(Boolean),
+      },
+      {
+        id: 'advanced',
+        label: t.navAdvanced,
+        items: [
+          { id: 'diagnostics', label: t.navDiagnostics, icon: 'Stethoscope' },
+        ],
+      },
+    ].filter((group) => group.items.length > 0);
+    const visibleIds = navGroups.flatMap((g) => g.items.map((i) => i.id));
+    const active = visibleIds.includes(category) ? category : 'account';
+    void summary;
+    return h(
+      SettingsLayout,
+      {
+        notice: notice || copyNotice || undefined,
+        nav: h(SettingsNavigation, {
+          label: t.navLabel,
+          groups: navGroups,
+          value: active,
+          onChange: setCategory,
+        }),
+      },
       h(
-        'section',
-        { 'aria-label': t.networkTitle },
-        h('h3', null, t.networkTitle),
+        SettingsPanel,
+        { id: 'account', active: active === 'account' },
         h(
-          'label',
-          null,
-          t.controlFile,
-          h('input', {
-            type: 'file',
-            accept: '.json,application/json',
-            disabled: busy || !state?.networkControl?.available,
-            onChange: (/** @type {any} */ event) =>
+          AccountCard,
+          {
+            initials,
+            title: displayName,
+            empNo: empNoValue || undefined,
+            refresh: h(SettingIconButton, {
+              icon: 'RefreshCw',
+              label: t.refresh,
+              disabled: busy,
+              busy,
+              onClick: reload,
+            }),
+          },
+          !managed &&
+            h(SettingRow, {
+              icon: 'Monitor',
+              label: t.localLogin,
+              status: h(StatusIndicator, {
+                tone: localTone,
+                label: localStatusLabel,
+              }),
+              action: localAction,
+            }),
+          h(SettingRow, {
+            icon: 'Cloud',
+            label: managed ? t.managed : t.cloudConnection,
+            description: cloudDescription,
+            status: h(StatusIndicator, {
+              tone: cloudTone,
+              label: cloudStatusLabel,
+            }),
+            action: cloudAction,
+          }),
+        ),
+        h(
+          SettingsSection,
+          {
+            'aria-label': t.identityInfo,
+          },
+          h(SettingReadonly, {
+            label: t.fullName,
+            value: profileName || identityValue || t.notProvided,
+          }),
+          h(SettingReadonly, {
+            label: t.empNo,
+            value: empNoValue || t.notProvided,
+          }),
+          h(SettingReadonly, {
+            label: t.department,
+            value: department || t.notProvided,
+          }),
+          managed && h(SettingStatus, null, t.managed),
+        ),
+      ),
+      showPlatform &&
+        h(
+          SettingsPanel,
+          {
+            id: 'platform',
+            active: active === 'platform',
+            'aria-label': t.platform,
+          },
+          h(PlatformCard, {
+            title: t.aurigaCloud,
+            status: h(StatusIndicator, {
+              tone: connectionTone,
+              label: platformConnectionLabel,
+            }),
+            notice:
+              state && state.platformOrigin !== state.activeOrigin
+                ? h(SettingStatus, { tone: 'warn' }, t.pending)
+                : null,
+            actions: [
+              h(
+                SettingAction,
+                {
+                  key: 'test',
+                  compact: true,
+                  disabled: busy || !address.trim(),
+                  onClick: () =>
+                    run(async () => {
+                      const result = await call('auriga/settings/test', {
+                        platformOrigin: address,
+                      });
+                      setNotice(
+                        result.reachable
+                          ? t.reachable
+                          : result.reason === 'http'
+                            ? t.http + result.status
+                            : (t[
+                                /** @type {keyof typeof t} */ (result.reason)
+                              ] ?? t.unavailable),
+                      );
+                    }),
+                },
+                t.test,
+              ),
+              h(
+                SettingAction,
+                {
+                  key: 'save',
+                  primary: true,
+                  compact: true,
+                  disabled:
+                    busy ||
+                    !state ||
+                    address.trim() === (state?.platformOrigin ?? '').trim(),
+                  onClick: () =>
+                    run(async () => {
+                      try {
+                        await call('auriga/settings/save', {
+                          platformOrigin: address,
+                          deployment: state?.deployment ?? 'local',
+                        });
+                      } finally {
+                        await readState();
+                      }
+                      setNotice(t.saved);
+                    }),
+                },
+                t.save,
+              ),
+            ],
+            children: h(
+              'div',
+              { className: 'auriga-platform-card-fields' },
+              h(
+                'div',
+                { className: 'auriga-platform-field' },
+                h(
+                  'label',
+                  {
+                    className: 'auriga-platform-field-label',
+                    htmlFor: 'auriga-platform-address',
+                  },
+                  t.address,
+                ),
+                h(
+                  PlatformAddressField,
+                  null,
+                  h(SettingInput, {
+                    id: 'auriga-platform-address',
+                    'aria-label': t.address,
+                    value: address,
+                    disabled: busy || !state,
+                    onChange: (/** @type {any} */ event) =>
+                      setAddress(event.target.value),
+                  }),
+                ),
+              ),
+            ),
+          }),
+        ),
+      showProxy &&
+        h(
+          SettingsPanel,
+          {
+            id: 'proxy',
+            active: active === 'proxy',
+            'aria-label': t.proxyTitle,
+          },
+          h(NetworkProxyView, {
+            t,
+            proxy: state.proxy,
+            busy,
+            onSave: async (/** @type {any} */ payload) => {
+              let ok = false;
+              writeInFlightRef.current += 1;
+              try {
+                await run(async () => {
+                  const next = await call('auriga/settings/proxy', payload);
+                  stateSeqRef.current += 1;
+                  setState(next);
+                  setNotice(t.saved);
+                  ok = true;
+                });
+              } finally {
+                writeInFlightRef.current -= 1;
+              }
+              return ok;
+            },
+            onReset: async () => {
+              let ok = false;
+              writeInFlightRef.current += 1;
+              try {
+                await run(async () => {
+                  const next = await call('auriga/settings/proxy/reset', {});
+                  stateSeqRef.current += 1;
+                  setState(next);
+                  setNotice(t.proxyResetDone);
+                  ok = true;
+                });
+              } finally {
+                writeInFlightRef.current -= 1;
+              }
+              return ok;
+            },
+            onTest: async (/** @type {string} */ url) => {
+              let result = null;
+              await run(async () => {
+                result = await call('auriga/settings/proxy/test', { url });
+              });
+              return result;
+            },
+          }),
+        ),
+      showDesktop &&
+        h(
+          SettingsPanel,
+          {
+            id: 'desktop',
+            active: active === 'desktop',
+            'aria-label': t.desktop,
+          },
+          h(DesktopUpdateView, {
+            t,
+            desktop: state.desktop,
+            busy,
+            currentVersion: boot?.pluginVersion,
+            onCheck: () =>
               run(async () => {
-                const file = event.target.files?.[0];
-                setControlReceipt(null);
-                setControlText('');
-                if (!file) return;
-                if (file.size > 32 * 1024 * 1024)
-                  throw new Error('invalidSettings');
-                setControlText(await file.text());
+                await call('auriga/settings/desktop', { action: 'check' });
+                await readState();
+              }),
+            onUpdate: () =>
+              run(async () => {
+                await call(
+                  'auriga/settings/desktop',
+                  { action: 'update' },
+                  { timeoutMs: null },
+                );
+                await readState();
+              }),
+            onCancel: () =>
+              run(async () => {
+                await call('auriga/settings/desktop', { action: 'cancel' });
+                await readState();
+              }),
+            onToggleEnabled: (/** @type {boolean} */ enabled) =>
+              run(async () => {
+                await call('auriga/settings/desktop', { enabled });
+                await readState();
+              }),
+            onChangeChannel: (/** @type {string} */ channel) =>
+              run(async () => {
+                await call('auriga/settings/desktop', { channel });
+                await call('auriga/settings/desktop', { action: 'check' });
+                await readState();
               }),
           }),
         ),
-        button(
-          t.controlImport,
-          () =>
-            run(async () => {
-              const result = await call('auriga/settings/network-control', {
-                packageJson: controlText,
-              });
-              setControlReceipt(result.receipt);
-              setNotice(t.controlSaved);
+      h(
+        SettingsPanel,
+        {
+          id: 'network',
+          active: active === 'network',
+          'aria-label': t.networkTitle,
+        },
+        h(
+          SettingsCard,
+          {
+            icon: 'Radio',
+            title: t.networkTitle,
+            status: h(StatusIndicator, {
+              tone: statusError
+                ? 'error'
+                : ready
+                  ? 'success'
+                  : recovering ||
+                      ['connecting', 'registering', 'joining'].includes(
+                        network?.state,
+                      )
+                    ? 'processing'
+                    : 'idle',
+              label: statusError || networkText,
             }),
-          !controlText || !state?.networkControl?.available,
-        ),
-        !state?.networkControl?.available && h('p', null, t.controlMissing),
-        controlReceipt &&
+          },
           h(
-            'a',
-            {
-              download: 'auriga-control-receipt.json',
-              href:
-                'data:application/json;charset=utf-8,' +
-                encodeURIComponent(JSON.stringify(controlReceipt)),
-            },
-            t.controlReceipt,
+            'div',
+            { className: 'auriga-network-info' },
+            (() => {
+              const endpoint =
+                network?.address ?? account?.connection?.endpointId ?? '';
+              return endpoint
+                ? h(
+                    'div',
+                    { className: 'auriga-network-info-row' },
+                    h(
+                      'span',
+                      { className: 'auriga-network-info-label' },
+                      t.endpoint,
+                    ),
+                    h(
+                      'div',
+                      { className: 'auriga-network-info-value' },
+                      h(
+                        'span',
+                        {
+                          className: 'auriga-network-info-text',
+                          title: endpoint,
+                        },
+                        endpoint,
+                      ),
+                      h(SettingIconButton, {
+                        icon: 'Copy',
+                        label: t.copy,
+                        onClick: () => copyText(endpoint),
+                      }),
+                    ),
+                  )
+                : null;
+            })(),
+            h(
+              'div',
+              { className: 'auriga-network-info-row' },
+              h('span', { className: 'auriga-network-info-label' }, t.received),
+              h(
+                'div',
+                { className: 'auriga-network-info-value' },
+                h(
+                  'span',
+                  { className: 'auriga-network-info-text' },
+                  String(
+                    account?.connection?.received ?? network?.received ?? 0,
+                  ),
+                ),
+              ),
+            ),
           ),
-        row(t.networkTitle, statusError || networkText),
-        (network?.address ?? account?.connection?.endpointId) &&
-          row(t.endpoint, network?.address ?? account?.connection?.endpointId),
-        row(
-          t.received,
-          String(account?.connection?.received ?? network?.received ?? 0),
+        ),
+        h(
+          SettingsCard,
+          {
+            icon: 'Package',
+            title: t.controlFile,
+            notice: !state?.networkControl?.available
+              ? h(SettingStatus, { tone: 'warn' }, t.controlMissing)
+              : controlReceipt
+                ? h(
+                    SettingStatus,
+                    null,
+                    h(
+                      'a',
+                      {
+                        className: 'auriga-setting-action',
+                        download: 'auriga-control-receipt.json',
+                        href:
+                          'data:application/json;charset=utf-8,' +
+                          encodeURIComponent(JSON.stringify(controlReceipt)),
+                      },
+                      t.controlReceipt,
+                    ),
+                  )
+                : null,
+          },
+          h(
+            'div',
+            { className: 'auriga-control-import-row' },
+            h(SettingFilePicker, {
+              accept: '.json,application/json',
+              'aria-label': t.controlFile,
+              placeholder: t.controlPick,
+              clearLabel: t.controlClear,
+              disabled: busy || !state?.networkControl?.available,
+              file: controlFile,
+              onChange: (/** @type {File|null} */ file) =>
+                run(async () => {
+                  setControlReceipt(null);
+                  setControlFile(null);
+                  setControlText('');
+                  if (!file) return;
+                  if (file.size > 32 * 1024 * 1024)
+                    throw new Error('invalidSettings');
+                  const text = await file.text();
+                  setControlFile(file);
+                  setControlText(text);
+                }),
+            }),
+            h(
+              SettingAction,
+              {
+                primary: true,
+                disabled:
+                  busy || !controlText || !state?.networkControl?.available,
+                onClick: () =>
+                  run(async () => {
+                    const result = await call(
+                      'auriga/settings/network-control',
+                      { packageJson: controlText },
+                    );
+                    setControlReceipt(result.receipt);
+                    setNotice(t.controlSaved);
+                  }),
+              },
+              t.controlImport,
+            ),
+          ),
         ),
         loggedIn && receiveControls,
-        loggedIn && account?.capabilities?.consent === true && consent,
+      ),
+      showConsent &&
+        h(
+          SettingsPanel,
+          {
+            id: 'consent',
+            active: active === 'consent',
+            'aria-label': t.navConsent,
+          },
+          consent,
+        ),
+      h(
+        SettingsPanel,
+        {
+          id: 'skills',
+          active: active === 'skills',
+          'aria-label': t.navSkills,
+        },
+        active === 'skills' ? h(PrivateSkillsView, { locale }) : null,
       ),
       h(
-        'details',
-        null,
-        h('summary', null, t.diagnostics),
-        (loggedIn || recovering) &&
-          account?.account?.subject &&
-          row(t.memberId, account.account.subject),
-        row(t.protocol, String(boot?.protocol ?? t.notProvided)),
-        row(t.version, boot?.pluginVersion ?? t.notProvided),
-        row(t.source, boot?.source ?? t.notProvided),
-        row(t.model, modelText),
-        row(
-          t.reason,
-          network?.reason ?? account?.communication ?? t.notProvided,
+        SettingsPanel,
+        {
+          id: 'diagnostics',
+          active: active === 'diagnostics',
+          'aria-label': t.diagnostics,
+        },
+        h(
+          SettingsCard,
+          {
+            icon: 'Stethoscope',
+            title: t.navDiagnostics,
+            description: t.diagnosticsHint,
+            status: h(
+              SettingAction,
+              {
+                compact: true,
+                icon: 'Copy',
+                onClick: () =>
+                  copyText(
+                    diagnosticFields
+                      .map(
+                        (/** @type {any} */ field) =>
+                          field.label + ': ' + field.display,
+                      )
+                      .join('\n'),
+                    'all',
+                  ),
+              },
+              t.copyAll,
+            ),
+          },
+          ...diagnosticFields.map((/** @type {any} */ field) =>
+            h(SettingReadonly, {
+              key: field.key,
+              label: field.label,
+              value: field.display,
+              status: field.status,
+              muted: !field.provided,
+              copied: copiedKey === field.key,
+              copyLabel: t.copy,
+              copySlot: true,
+              onCopy: field.provided
+                ? () => copyText(String(field.value), field.key)
+                : undefined,
+            }),
+          ),
         ),
       ),
-      h(PrivateSkillsView, { locale }),
-      notice && h('p', { role: 'status', 'aria-live': 'polite' }, notice),
     );
   };
 }

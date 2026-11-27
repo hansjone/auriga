@@ -13,11 +13,13 @@ async function fixture(api, locale = 'zh', http) {
     effects = [],
     cursor = 0;
   const React = {
-    createElement: (type, props, ...children) => ({
-      type,
-      props: props ?? {},
-      children: children.flat(Infinity),
-    }),
+    Fragment: Symbol('Fragment'),
+    createElement: (type, props, ...children) => {
+      const flat = children.flat(Infinity);
+      if (type === React.Fragment)
+        return { type, props: props ?? {}, children: flat };
+      return { type, props: props ?? {}, children: flat };
+    },
     useState(initial) {
       const i = cursor++;
       if (!(i in values))
@@ -393,7 +395,12 @@ test('settings show organization locks and revoke refreshes the list', async () 
   try {
     let tree = await f.render(true);
     assert.match(text(tree), /org-1/);
-    const defaults = all(tree).filter((n) => n.type === 'select');
+    const defaults = all(tree).filter(
+      (n) =>
+        n.type === 'button' &&
+        n.props?.['aria-haspopup'] === 'listbox' &&
+        n.props?.['aria-label'],
+    );
     assert.equal(defaults[0].props.disabled, false);
     assert.equal(defaults[1].props.disabled, true);
     const revoke = all(tree).find(
@@ -502,13 +509,27 @@ test('each default changes only its layer and organization deny is locked', asyn
     setDefault: async (...args) => calls.push(args),
   });
   try {
-    const tree = await f.render(true);
-    const selects = all(tree).filter((n) => n.type === 'select');
-    assert.equal(selects[1].props.value, 'deny_all');
-    assert.equal(selects[1].props.disabled, true);
-    await selects[1].props.onChange({ target: { value: 'same_org' } });
+    let tree = await f.render(true);
+    const triggers = all(tree).filter(
+      (n) =>
+        n.type === 'button' &&
+        n.props?.['aria-haspopup'] === 'listbox' &&
+        n.props?.['aria-label'],
+    );
+    assert.match(text(triggers[1]), /全部拒绝|Deny all/);
+    assert.equal(triggers[1].props.disabled, true);
+    await triggers[1].props.onClick({ stopPropagation() {} });
     assert.equal(calls.length, 0);
-    await selects[0].props.onChange({ target: { value: 'allowlist' } });
+    await triggers[0].props.onClick({ stopPropagation() {} });
+    tree = await f.render(true);
+    const allowlist = all(tree).find(
+      (n) =>
+        n.type === 'button' &&
+        n.props?.role === 'option' &&
+        /仅白名单自动允许/.test(text(n)),
+    );
+    assert.ok(allowlist);
+    await allowlist.props.onClick({ stopPropagation() {} });
     assert.equal(calls[0][0], 'conversation');
     assert.equal(calls[0][1], 'allowlist');
   } finally {

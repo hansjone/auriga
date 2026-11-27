@@ -180,15 +180,29 @@ export function catalogRoutes(options) {
         const params = new URLSearchParams(query);
         for (const [key, value] of params) {
           if (
-            !['cursor', 'limit', 'kind'].includes(key) ||
+            !['cursor', 'limit', 'kind', 'page', 'search', 'sort'].includes(
+              key,
+            ) ||
             (key === 'kind' && !['plugin', 'skill'].includes(value)) ||
             params.getAll(key).length !== 1 ||
             (key === 'limit' &&
               !/^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|200)$/.test(value)) ||
-            (key === 'cursor' && (!value || value.length > 2048))
+            (key === 'cursor' && (!value || value.length > 2048)) ||
+            (key === 'page' && !/^[1-9][0-9]*$/.test(value)) ||
+            (key === 'search' && value.length > 200) ||
+            (key === 'sort' &&
+              value !== '' &&
+              ![
+                'publishedAt',
+                'installationCount',
+                'starCount',
+                'name',
+              ].includes(value)) ||
+            (params.has('page') && params.has('cursor'))
           )
             refuse('common.validation_failed');
         }
+        if (params.get('sort') === '') params.delete('sort');
         const { value } = await api.request(
           '/api/resource/v1/catalog/' +
             pathname +

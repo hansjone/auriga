@@ -167,6 +167,9 @@ describe('plugin market', () => {
       older,
       newer,
     ]);
+    expect(filterPlugins(packages, { ...filters, search: '研发' })).toEqual([
+      newer,
+    ]);
     expect(
       filterPlugins(packages, {
         ...filters,
@@ -190,6 +193,13 @@ describe('plugin market', () => {
       older,
       legacy,
     ]);
+    expect(
+      filterPlugins(packages, { ...filters, sort: 'name' }).map((p) => p.name),
+    ).toEqual(
+      [newer, legacy, older]
+        .map((p) => p.name)
+        .sort((a, b) => a.localeCompare(b)),
+    );
   });
   it('rejects repeated cursors and duplicate packages', async () => {
     await expect(

@@ -163,13 +163,13 @@ async function fixture(http, options = {}) {
     effects = [];
     return component(props);
   };
-  const settings = shallow(slots.get('main'));
-  const section = all(settings).find((n) => n.type?.name === 'PlatformCard');
-  assert.ok(section, 'native shell includes shared consent component');
+  // Overview no longer mounts PlatformCard; the harness seat exposes it for login tests.
+  const PlatformCard = slots.get('auriga.platform-card');
+  assert.ok(PlatformCard, 'native shell registers shared PlatformCard');
   values = [];
   effects = [];
   const render = async (shell, modal = true) => {
-    let tree = shallow(section.type, {
+    let tree = shallow(PlatformCard, {
       boot: { mode: 'connect' },
       shell,
       modal,
@@ -178,7 +178,7 @@ async function fixture(http, options = {}) {
     });
     for (const effect of effects) effect();
     await new Promise((resolve) => setImmediate(resolve));
-    tree = shallow(section.type, {
+    tree = shallow(PlatformCard, {
       boot: { mode: 'connect' },
       shell,
       modal,
@@ -208,7 +208,7 @@ async function fixture(http, options = {}) {
   return {
     render,
     renderOverview: (shell) =>
-      renderSurface('overview', section.type, {
+      renderSurface('overview', PlatformCard, {
         boot: { mode: 'connect' },
         shell,
         modal: false,
@@ -266,7 +266,7 @@ async function fixture(http, options = {}) {
     manual(shell) {
       const saved = values;
       values = [];
-      const tree = shallow(section.type, {
+      const tree = shallow(PlatformCard, {
         boot: { mode: 'connect' },
         shell,
         reloadShell() {},
