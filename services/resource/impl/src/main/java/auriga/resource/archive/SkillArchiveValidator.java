@@ -16,6 +16,81 @@ import tools.jackson.databind.JsonNode;
 public final class SkillArchiveValidator {
   private SkillArchiveValidator() {}
 
+  private static final Set<String> ROOT_DEPENDENCY_FILES =
+      Set.of("requirements.txt", "pyproject.toml", "package.json", "uv.lock", "poetry.lock");
+
+  private enum SkillFileClass {
+    ENTRY,
+    DOC,
+    SCRIPT_OR_DEP,
+    INVALID
+  }
+
+  private static String extensionExact(String path) {
+    int slash = path.lastIndexOf('/');
+    int dot = path.lastIndexOf('.');
+    return dot > slash ? path.substring(dot) : "";
+  }
+
+  private static SkillFileClass classifySkillFile(String path) {
+    if (path.equals("SKILL.md")) return SkillFileClass.ENTRY;
+    if (ROOT_DEPENDENCY_FILES.contains(path)) return SkillFileClass.SCRIPT_OR_DEP;
+    String extExact = extensionExact(path);
+    if (path.startsWith("references/") || path.startsWith("assets/")) {
+      return switch (extExact) {
+        case ".md", ".txt", ".json", ".yaml", ".yml" -> SkillFileClass.DOC;
+        default -> SkillFileClass.INVALID;
+      };
+    }
+    String ext = extExact.toLowerCase(Locale.ROOT);
+    if (path.startsWith("scripts/")) {
+      return switch (ext) {
+        case ".py",
+            ".sh",
+            ".bash",
+            ".ps1",
+            ".js",
+            ".mjs",
+            ".cjs",
+            ".ts",
+            ".mts",
+            ".cts",
+            ".md",
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".cfg",
+            ".csv",
+            ".sql",
+            ".lock" ->
+            SkillFileClass.SCRIPT_OR_DEP;
+        default -> SkillFileClass.INVALID;
+      };
+    }
+    return SkillFileClass.INVALID;
+  }
+
+  private static boolean isAllowedSkillPathChars(String path) {
+    for (int i = 0; i < path.length(); ) {
+      int cp = path.codePointAt(i);
+      if (!((cp >= 0x20 && cp <= 0x7e) || (cp >= 0x4e00 && cp <= 0x9fff))) return false;
+      i += Character.charCount(cp);
+    }
+    return true;
+  }
+
+  private static boolean isAllowedSkillDirectory(String path) {
+    return path.equals("references")
+        || path.equals("assets")
+        || path.equals("scripts")
+        || path.startsWith("references/")
+        || path.startsWith("assets/")
+        || path.startsWith("scripts/");
+  }
+
   public static String validate(InputStream source, long compressedSize, JsonNode manifest) {
     try (var owned = source;
         var buffered = new BufferedInputStream(owned, 8192)) {
@@ -35,6 +110,7 @@ public final class SkillArchiveValidator {
                 gzip, Math.min(20L * 1024 * 1024, compressedSize * 100));
         try (var tar = new StrictUstarInputStream(expanded, true)) {
           byte[] skill = null;
+          boolean hasScriptsOrDeps = false;
           var text = new StringBuilder();
           for (var entry = tar.getNextEntry(); entry != null; entry = tar.getNextEntry()) {
             if (tar.entries > 512 || entry.getSize() > 2097152) throw invalid();
@@ -42,16 +118,18 @@ public final class SkillArchiveValidator {
             if (entry.isDirectory() && path.endsWith("/"))
               path = path.substring(0, path.length() - 1);
             CatalogManifest.path(path);
-            if (path.getBytes(StandardCharsets.UTF_8).length > 240
+            if (((path.equals("scripts") || path.startsWith("scripts/"))
+                    && !isAllowedSkillPathChars(path))
+                || path.getBytes(StandardCharsets.UTF_8).length > 240
                 || path.split("/").length > 8
-                || (entry.getMode() & 0111) != 0 && !entry.isDirectory()) throw invalid();
-            if (!path.equals("SKILL.md")
-                && !path.equals("references")
-                && !path.equals("assets")
-                && !path.startsWith("references/")
-                && !path.startsWith("assets/")) throw invalid();
-            if (!entry.isDirectory()) {
-              if (!path.matches(".*\\.(md|txt|json|yaml|yml)$")) throw invalid();
+                || (entry.getMode() & 07000) != 0
+                || ((entry.getMode() & 0111) != 0 && !entry.isDirectory())) throw invalid();
+            if (entry.isDirectory()) {
+              if (!isAllowedSkillDirectory(path)) throw invalid();
+            } else {
+              SkillFileClass kind = classifySkillFile(path);
+              if (kind == SkillFileClass.INVALID) throw invalid();
+              if (kind == SkillFileClass.SCRIPT_OR_DEP) hasScriptsOrDeps = true;
               byte[] bytes = tar.readNBytes(2097153);
               if (bytes.length != entry.getSize()) throw invalid();
               String decoded = CatalogManifest.utf8(bytes);
@@ -72,13 +150,13 @@ public final class SkillArchiveValidator {
           frontmatter(CatalogManifest.utf8(skill), manifest);
           boolean permissions = false;
           for (var p : manifest.path("permissions")) if (!p.isEmpty()) permissions = true;
-          // Conservative floor: command fences, executable invocations and tool/network/file
-          // directions.
+          // Conservative floor: command fences, executable invocations, bundled scripts/deps
+          // and tool/network/file directions.
           String content = text.toString().toLowerCase(Locale.ROOT);
           boolean command =
               content.matches(
                   "(?s).*(?:```|~~~|`[^`]+`|\\$ |\\b(?:curl|wget|bash|powershell|cmd\\.exe|python|node|npm|pnpm|sudo|execute|run command|invoke|tool call)\\b|\u6267\u884c|\u8fd0\u884c\u547d\u4ee4|\u8c03\u7528\u5de5\u5177|\u8bfb\u53d6\u6587\u4ef6|\u53d1\u9001\u8bf7\u6c42).*");
-          return permissions || command ? "r2" : "r1";
+          return permissions || command || hasScriptsOrDeps ? "r2" : "r1";
         }
       }
     } catch (auriga.common.error.AurigaException e) {

@@ -1,5 +1,6 @@
 /* global ReadableStream */
-const max = 10 * 1024 * 1024;
+const max = 20 * 1024 * 1024;
+const maxTextPreviewBytes = 256 * 1024;
 export async function boundedBytes(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader(),
     chunks: Uint8Array[] = [];
@@ -41,12 +42,25 @@ export type PreviewFile = {
   text: string;
   binary?: boolean;
   sizeBytes?: number;
+  truncated?: boolean;
+  contentHash?: string;
 };
 
 export type PreviewArchiveResult = {
   files: PreviewFile[];
   truncated: boolean;
 };
+
+function fnv1a64Hex(bytes: Uint8Array): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= BigInt(bytes[i]!);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
 
 export async function archivePreview(
   response: Response,
@@ -59,8 +73,10 @@ export async function archivePreviewWithMeta(
   response: Response,
   kind: 'skill' | 'plugin',
 ): Promise<PreviewArchiveResult> {
-  if (kind === 'skill')
-    return { files: await skillPreview(response), truncated: false };
+  if (kind === 'skill') {
+    const files = await skillPreview(response);
+    return { files, truncated: false };
+  }
   if (!response.body) throw new Error('Missing body');
   const bytes = await boundedBytes(response.body);
   const raw =
@@ -152,12 +168,12 @@ export function tarArchiveEntriesWithMeta(
   }
   return { files: result, truncated };
 }
-export function tarText(raw: Uint8Array) {
+export function tarText(raw: Uint8Array): PreviewFile[] {
   const decoder = new TextDecoder('utf-8', { fatal: true }),
-    result: { path: string; text: string }[] = [];
+    result: PreviewFile[] = [];
   const seen = new Set<string>();
   for (let offset = 0, count = 0; offset + 512 <= raw.length; count++) {
-    if (count > 128) throw new Error('Entry budget');
+    if (count > 512) throw new Error('Entry budget');
     const header = raw.subarray(offset, offset + 512);
     if (header.every((b) => b === 0)) return result;
     const str = (start: number, end: number) =>
@@ -175,22 +191,37 @@ export function tarText(raw: Uint8Array) {
       path.split('/').some((s) => s === '.' || s === '..') ||
       seen.has(path) ||
       !['', '0', '5'].includes(type) ||
-      size > 1024 * 1024 ||
+      size > 2 * 1024 * 1024 ||
       offset + 512 + size > raw.length
     )
       throw new Error('Unsafe preview');
     seen.add(path);
     if (type !== '5') {
-      const text = decoder.decode(
-        raw.subarray(offset + 512, offset + 512 + size),
+      const fullSlice = raw.subarray(offset + 512, offset + 512 + size);
+      const fullText = decoder.decode(fullSlice);
+      if (fullText.includes('\0')) throw new Error('Binary content');
+      const truncated = fullText.length > maxTextPreviewBytes;
+      let previewText = fullText;
+      if (truncated) {
+        let cut = maxTextPreviewBytes;
+        const last = fullText.charCodeAt(cut - 1);
+        if (last >= 0xd800 && last <= 0xdbff) cut -= 1;
+        previewText =
+          fullText.slice(0, cut) +
+          `\n\n[文件较大 (${size} bytes)，仅展示前 256K 字符预览]`;
+      }
+      const text = previewText;
+      result.push(
+        truncated
+          ? {
+              path,
+              text,
+              sizeBytes: size,
+              truncated: true,
+              contentHash: fnv1a64Hex(fullSlice),
+            }
+          : { path, text },
       );
-      if (
-        [...text].some(
-          (c) => c.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(c),
-        )
-      )
-        throw new Error('Binary content');
-      result.push({ path, text });
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }

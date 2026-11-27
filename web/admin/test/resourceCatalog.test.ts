@@ -138,9 +138,12 @@ afterEach(() => {
 it('loads reviewId detail, exact preconditions and command risk floor; text stays inert', async () => {
   const view = setup();
   vi.spyOn(api, 'artifact').mockResolvedValue({} as Response);
-  vi.spyOn(preview, 'skillPreview').mockResolvedValue([
-    { path: 'SKILL.md', text: '<script>alert(1)</script>\nrun terminal' },
-  ]);
+  vi.spyOn(preview, 'archivePreviewWithMeta').mockResolvedValue({
+    files: [
+      { path: 'SKILL.md', text: '<script>alert(1)</script>\nrun terminal' },
+    ],
+    truncated: false,
+  });
   const decide = vi.spyOn(api, 'decide').mockResolvedValue(r);
   await flushPromises();
   await view.get('[data-testid="catalog-review"]').trigger('click');
@@ -431,12 +434,81 @@ it('rejects preview traversal, links, invalid UTF-8 and oversized streams', asyn
     boundedBytes(
       new ReadableStream({
         start(c) {
-          c.enqueue(new Uint8Array(11 * 1024 * 1024));
+          c.enqueue(new Uint8Array(21 * 1024 * 1024));
           c.close();
         },
       }),
     ),
   ).rejects.toThrow('Preview budget');
+
+  const bigTar = (tail: string) => {
+    const body = 'a'.repeat(300 * 1024) + tail;
+    const bodyBytes = new TextEncoder().encode(body);
+    const padded = Math.ceil(bodyBytes.length / 512) * 512;
+    const buf = new Uint8Array(512 + padded + 1024);
+    buf.set(new TextEncoder().encode('scripts/big.py'));
+    buf.set(
+      new TextEncoder().encode(
+        bodyBytes.length.toString(8).padStart(11, '0') + '\0',
+      ),
+      124,
+    );
+    buf[156] = 48;
+    buf.set(bodyBytes, 512);
+    return buf;
+  };
+  const a = tarText(bigTar('ONE'))[0]!;
+  const b = tarText(bigTar('TWO'))[0]!;
+  expect(a.truncated).toBe(true);
+  expect(b.truncated).toBe(true);
+  expect(a.text).toBe(b.text);
+  expect(a.contentHash).not.toBe(b.contentHash);
+});
+
+it('renders truncated tail diff notice in review comparison when visible prefix matches', async () => {
+  const view = setup();
+  vi.spyOn(api, 'version').mockResolvedValue({
+    data: { ...v, id: 'v0', version: '0.9.0' },
+    etag: '"1"',
+  });
+  vi.spyOn(api, 'artifact').mockResolvedValue({} as Response);
+  const spy = vi.spyOn(preview, 'archivePreviewWithMeta');
+  spy.mockResolvedValueOnce({
+    files: [
+      {
+        path: 'scripts/big.py',
+        text: 'same-prefix',
+        sizeBytes: 300000,
+        truncated: true,
+        contentHash: 'aaaaaaaaaaaaaaaa',
+      },
+    ],
+    truncated: false,
+  });
+  spy.mockResolvedValueOnce({
+    files: [
+      {
+        path: 'scripts/big.py',
+        text: 'same-prefix',
+        sizeBytes: 300000,
+        truncated: true,
+        contentHash: 'bbbbbbbbbbbbbbbb',
+      },
+    ],
+    truncated: false,
+  });
+  await flushPromises();
+  await view.get('[data-testid="catalog-review"]').trigger('click');
+  await flushPromises();
+  const compareInput = view.get('input:not([data-testid="catalog-reason"])');
+  await compareInput.setValue('v0');
+  const compareBtn = view
+    .findAll('button')
+    .find((b) => b.text().trim() === '对比');
+  expect(compareBtn).toBeTruthy();
+  await compareBtn!.trigger('click');
+  await flushPromises();
+  expect(view.text()).toContain('截断预览外内容已变更');
 });
 
 it('enforces plugin R2 and distinct security quorum even on a malformed lower server assessment', () => {

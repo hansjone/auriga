@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
@@ -97,12 +99,46 @@ func unifiedRead(file string, value any) error {
 	return decoder.Decode(value)
 }
 
+func unifiedSkillRootFile(name string) bool {
+	switch name {
+	case "SKILL.md", "requirements.txt", "pyproject.toml", "package.json", "uv.lock", "poetry.lock":
+		return true
+	default:
+		return false
+	}
+}
+
+func unifiedSkillFileAllowed(name string) bool {
+	if unifiedSkillRootFile(name) {
+		return true
+	}
+	ext := strings.ToLower(path.Ext(name))
+	if strings.HasPrefix(name, "references/") || strings.HasPrefix(name, "assets/") {
+		switch ext {
+		case ".md", ".txt", ".json", ".yaml", ".yml":
+			return true
+		default:
+			return false
+		}
+	}
+	if strings.HasPrefix(name, "scripts/") {
+		switch ext {
+		case ".py", ".sh", ".bash", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts",
+			".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql", ".lock":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func unifiedArchivePath(name string) (string, error) {
-	if !utf8.ValidString(name) || len(name) > 240 || strings.ContainsAny(name, "\\:\x00") || strings.HasPrefix(name, "/") {
+	if !utf8.ValidString(name) || strings.ContainsAny(name, "\\:\x00") || strings.HasPrefix(name, "/") {
 		return "", fmt.Errorf("unsafe skill archive path")
 	}
 	name = strings.TrimSuffix(name, "/")
-	if name == "" || path.Clean(name) != name || len(strings.Split(name, "/")) > 8 {
+	if name == "" || len(name) > 240 || path.Clean(name) != name || len(strings.Split(name, "/")) > 8 {
 		return "", fmt.Errorf("unsafe skill archive path")
 	}
 	parts := strings.Split(name, "/")
@@ -111,12 +147,19 @@ func unifiedArchivePath(name string) (string, error) {
 			return "", fmt.Errorf("unsafe skill archive path")
 		}
 		for _, r := range part {
-			if r < 32 || r == 127 {
+			if parts[0] == "scripts" {
+				if (r < 0x20 || r > 0x7e) && (r < 0x4e00 || r > 0x9fff) {
+					return "", fmt.Errorf("unsafe skill archive path")
+				}
+			} else if r < 32 || (r >= 0x7f && r <= 0x9f) {
 				return "", fmt.Errorf("unsafe skill archive path")
 			}
 		}
 	}
-	if parts[0] != "SKILL.md" && parts[0] != "references" && parts[0] != "assets" {
+	if len(parts) == 1 && unifiedSkillRootFile(parts[0]) {
+		return name, nil
+	}
+	if parts[0] != "references" && parts[0] != "assets" && parts[0] != "scripts" {
 		return "", fmt.Errorf("skill archive root refused")
 	}
 	return name, nil
@@ -169,7 +212,7 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 		if err != nil {
 			return err
 		}
-		key := norm.NFC.String(strings.ToLower(strings.ToUpper(norm.NFC.String(name))))
+		key := norm.NFC.String(cases.Lower(language.Und).String(cases.Upper(language.Und).String(norm.NFC.String(name))))
 		if seen[key] {
 			return fmt.Errorf("skill path collision")
 		}
@@ -179,7 +222,7 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 			return err
 		}
 		if header.Typeflag == tar.TypeDir {
-			if header.Size != 0 || name == "SKILL.md" {
+			if header.Size != 0 || unifiedSkillRootFile(name) {
 				return fmt.Errorf("unsafe skill directory")
 			}
 			if err := os.MkdirAll(target, 0755); err != nil {
@@ -190,10 +233,8 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 		if header.Typeflag != tar.TypeReg && header.Typeflag != 0 {
 			return fmt.Errorf("skill links/devices refused")
 		}
-		switch strings.ToLower(path.Ext(name)) {
-		case ".md", ".txt", ".json", ".yaml", ".yml":
-		default:
-			return fmt.Errorf("skill attachment is not text-only")
+		if !unifiedSkillFileAllowed(name) {
+			return fmt.Errorf("skill attachment is not allowed")
 		}
 		content, err := io.ReadAll(io.LimitReader(archive, 2*1024*1024+1))
 		if err != nil {

@@ -608,13 +608,28 @@ export function catalogService(options) {
       }
       throw error;
     }
+    /** @param {any} ver @returns {string} */
+    function receiptPayloadDigest(ver) {
+      const list = ver?.manifest?.artifacts;
+      if (
+        !Array.isArray(list) ||
+        list.length !== 1 ||
+        list[0]?.role !== 'payload' ||
+        typeof list[0]?.digest !== 'string' ||
+        !list[0].digest
+      )
+        refuse('resource.digest_mismatch');
+      return list[0].digest;
+    }
+    const uploadedPayloadDigest = receiptPayloadDigest(uploaded.value);
     if (
       !uuid(uploaded.value?.id) ||
       uploaded.value.packageId !== pack.value.id ||
       uploaded.value.kind !== kind ||
       uploaded.value.version !== version ||
       uploaded.value.state !== 'draft' ||
-      uploaded.value.digest !== manifestDigest
+      uploaded.value.digest !== manifestDigest ||
+      uploadedPayloadDigest !== artifacts[0].digest
     )
       refuse('resource.digest_mismatch');
     const review = await submissionStage('submit', () =>
@@ -634,6 +649,9 @@ export function catalogService(options) {
       ),
     );
     const result = review.value;
+    const submittedPayloadDigest = receiptPayloadDigest(result?.version);
+    if (submittedPayloadDigest !== artifacts[0].digest)
+      refuse('resource.digest_mismatch');
     if (
       !uuid(result?.reviewId) ||
       result.authorId !== who.ownerId ||
@@ -650,6 +668,7 @@ export function catalogService(options) {
       packageId: pack.value.id,
       versionId: uploaded.value.id,
       state: result.version.state,
+      digest: submittedPayloadDigest,
       manifestDigest,
     };
   }

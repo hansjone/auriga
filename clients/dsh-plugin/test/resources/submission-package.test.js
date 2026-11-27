@@ -126,30 +126,47 @@ test('rejects bad patches, native declarations and missing physical bundled depe
   await assert.rejects(prepare(), /src\/Binding.Gyp/);
 });
 
-test('skill validates metadata and preserves original text bytes', async (t) => {
+test('skill validates metadata, packs scripts and dependency manifests, and rejects unsupported files', async (t) => {
   const { put, prepare } = await fixture(t);
   const skill =
     '---\r\nname: hello\r\ndescription: Greeting\r\n---\r\nHello\r\n';
   await put('SKILL.md', skill);
+  await put('requirements.txt', 'pydantic>=2.0\n');
+  await put('scripts/run.py', 'print("hello")\n');
+  await put('scripts/config.json', '{"mode":"safe"}\n');
   await put('references/readme.txt', '﻿hello\r\n');
+  await put('references/config.json', '{"ignored":true}\n');
   await put('references/secret.txt', 'excluded-sample');
-  await put('references/run.sh', 'excluded-sample');
-  const { manifest, archive } = await prepare('skill', {
+  await put('__pycache__/run.cpython-312.pyc', 'excluded-cache');
+  const { manifest, archive, hasScripts } = await prepare('skill', {
     metadata: { ...metadata, version: '1.0.0' },
   });
   const files = unpackSkill(archive, manifest);
   assert.equal(manifest.name, 'hello');
+  assert.equal(hasScripts, true);
   assert.equal(files['SKILL.md'].toString(), skill);
+  assert.equal(files['requirements.txt'].toString(), 'pydantic>=2.0\n');
+  assert.equal(files['scripts/run.py'].toString(), 'print("hello")\n');
+  assert.equal(files['scripts/config.json'].toString(), '{"mode":"safe"}\n');
   assert.equal(files['references/readme.txt'].toString(), '﻿hello\r\n');
   assert.deepEqual(Object.keys(files).sort(), [
     'SKILL.md',
     'references/readme.txt',
+    'requirements.txt',
+    'scripts/config.json',
+    'scripts/run.py',
   ]);
   await assert.rejects(
     prepare('skill', {
       metadata: { ...metadata, version: '1.0.0', name: 'wrong' },
     }),
     /SKILL.md/,
+  );
+  // Disallowed extension inside references/ must fail loudly instead of silently skipping.
+  await put('references/run.sh', 'echo nope\n');
+  await assert.rejects(
+    prepare('skill', { metadata: { ...metadata, version: '1.0.0' } }),
+    /references\/run\.sh/,
   );
 });
 

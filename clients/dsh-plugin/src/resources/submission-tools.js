@@ -12,7 +12,6 @@ const handleTtl = 15 * 60 * 1000;
 const maxHandles = 8;
 const maxReviewReason = 1024;
 const maxChangeNotes = 4096;
-const maxPreviewFiles = 30;
 const str = { type: 'string', minLength: 1 };
 const tags = documents.package.$defs.Plugin.properties.tags;
 const permissionsSchema = documents.package.$defs.Permissions;
@@ -165,9 +164,9 @@ function checkPrepare(args) {
     validationFailed();
 }
 
-/** @param {'plugin'|'skill'} kind @param {any} permissions */
-function estimateRisk(kind, permissions) {
-  if (kind === 'plugin') return 'r2';
+/** @param {'plugin'|'skill'} kind @param {any} permissions @param {boolean} [hasScripts] */
+function estimateRisk(kind, permissions, hasScripts = false) {
+  if (kind === 'plugin' || hasScripts) return 'r2';
   const hasPermissions =
     (permissions?.tools?.length ?? 0) > 0 ||
     (permissions?.outboundHosts?.length ?? 0) > 0 ||
@@ -175,9 +174,9 @@ function estimateRisk(kind, permissions) {
   return hasPermissions ? 'r2' : 'r1';
 }
 
-/** @typedef {{manifest:any,archive:Buffer,files?:string[],changeNotes?:string}} Prepared */
+/** @typedef {{manifest:any,archive:Buffer,files?:string[],hasScripts?:boolean,changeNotes?:string}} Prepared */
 /** @typedef {{cwd:string,directory:string,kind:'plugin'|'skill',metadata:any}} PrepareInput */
-/** @typedef {{packageId:string,versionId:string,state:'pending_review'}} Receipt */
+/** @typedef {{packageId:string,versionId:string,state:'pending_review',digest:string}} Receipt */
 /** @typedef {{reason:string,packageId?:string,changeNotes?:string,key:string}} Operation */
 /** @typedef {{prepared:Prepared, session:any, cwd:string, expires:number, existingPackageId?:string, operation?:Operation, pending?:Promise<Receipt>, receipt?:Receipt}} Snapshot */
 
@@ -304,12 +303,13 @@ export function installSubmissionTools(
         try {
           const { directory, kind, metadata } = args;
           /** @type {Prepared} */
-          const { manifest, archive, files, changeNotes } = await prepare({
-            cwd: native.cwd,
-            directory,
-            kind,
-            metadata,
-          });
+          const { manifest, archive, files, hasScripts, changeNotes } =
+            await prepare({
+              cwd: native.cwd,
+              directory,
+              kind,
+              metadata,
+            });
           check();
           if (
             !Buffer.isBuffer(archive) ||
@@ -407,6 +407,10 @@ export function installSubmissionTools(
           });
 
           const fileList = Array.isArray(files) ? files : [];
+          const archiveDigest =
+            typeof manifest.artifacts?.[0]?.digest === 'string'
+              ? manifest.artifacts[0].digest
+              : '';
           const dshVersionRange =
             kind === 'plugin'
               ? manifest.plugin?.dshVersionRange
@@ -429,10 +433,14 @@ export function installSubmissionTools(
             ...(normalizedChangeNotes
               ? { changeNotes: normalizedChangeNotes }
               : {}),
+            digest: archiveDigest,
             archiveBytes: archive.length,
             fileCount: fileList.length,
-            files: fileList.slice(0, maxPreviewFiles),
-            estimatedRisk: estimateRisk(kind, manifest.permissions),
+            estimatedRisk: estimateRisk(
+              kind,
+              manifest.permissions,
+              Boolean(hasScripts),
+            ),
             ...(existingPackage ? { existingPackage } : {}),
             ...(warnings.length ? { warnings } : {}),
           };
@@ -497,8 +505,12 @@ export function installSubmissionTools(
         )
           return refuse('common.conflict');
         if (row.receipt) return row.receipt;
+        const expectedDigest =
+          typeof row.prepared.manifest?.artifacts?.[0]?.digest === 'string'
+            ? row.prepared.manifest.artifacts[0].digest
+            : '';
         const pending = (row.pending ??= (async () => {
-          const { packageId, versionId, state } = await service(
+          const { packageId, versionId, state, digest } = await service(
             source.runtime,
           ).submitPrepared(
             {
@@ -511,10 +523,18 @@ export function installSubmissionTools(
           if (
             !uuid(packageId) ||
             !uuid(versionId) ||
-            state !== 'pending_review'
+            state !== 'pending_review' ||
+            typeof digest !== 'string' ||
+            !digest ||
+            (expectedDigest && digest !== expectedDigest)
           )
             return refuse('common.unavailable');
-          return Object.freeze({ packageId, versionId, state });
+          return Object.freeze({
+            packageId,
+            versionId,
+            state,
+            digest,
+          });
         })());
         try {
           const receipt = await pending;

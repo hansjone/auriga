@@ -18,7 +18,7 @@ test('submission uploads the exact frozen private snapshot and its declarations,
     source: source.replace('BEFORE FREEZE', 'LATER PRIVATE EDIT'),
   });
   const requests = [];
-  let manifestDigest;
+  let manifestDigest, uploadedManifest;
   const pack = {
     id: f.packageId,
     kind: 'skill',
@@ -54,6 +54,7 @@ test('submission uploads the exact frozen private snapshot and its declarations,
         manifest = JSON.parse(bytes),
         metadata = JSON.parse(await options.body.get('metadata').text());
       manifestDigest = sha(bytes);
+      uploadedManifest = manifest;
       assert.equal(metadata.expectedDigest, manifestDigest);
       assert.deepEqual(manifest.permissions, {
         tools: ['terminal.run'],
@@ -72,6 +73,7 @@ test('submission uploads the exact frozen private snapshot and its declarations,
           id: f.versionId,
           packageId: f.packageId,
           digest: manifestDigest,
+          manifest,
           kind: 'skill',
           version: '1.0.0',
           state: 'draft',
@@ -94,6 +96,7 @@ test('submission uploads the exact frozen private snapshot and its declarations,
             id: f.versionId,
             packageId: f.packageId,
             digest: manifestDigest,
+            manifest: uploadedManifest,
             kind: 'skill',
             version: '1.0.0',
             state: 'pending_review',
@@ -160,6 +163,7 @@ test('prepared plugin submission replays attach with its initial ETag and fresh 
     state: 'draft',
     revision: 1,
     digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+    manifest: f.manifest,
   };
   const submitKeys = [];
   let uploadAttempts = 0;
@@ -240,6 +244,7 @@ test('prepared plugin submission replays attach with its initial ETag and fresh 
     packageId: f.packageId,
     versionId: f.versionId,
     state: 'pending_review',
+    digest: input.manifest.artifacts[0].digest,
     manifestDigest: version.digest,
   });
   assert.equal(uploadAttempts, 2);
@@ -380,6 +385,7 @@ test('new package upload refreshes its verified package after a definite 412', a
     revision: 1,
     state: 'draft',
     digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+    manifest: f.manifest,
   };
   const requests = [];
   const s = catalogService({
@@ -425,4 +431,90 @@ test('new package upload refreshes its verified package after a definite 412', a
     [packagePath + '/versions', 'POST', '"2"'],
     [packagePath + '/versions/' + f.versionId + '/submissions', 'POST', '"1"'],
   ]);
+});
+
+test('prepared submission rejects missing, non-payload or conflicting payload digest in upload and submit receipts', async (t) => {
+  for (const mode of [
+    'upload-missing',
+    'upload-conflict',
+    'upload-role',
+    'submit-conflict',
+  ]) {
+    const f = catalogFixture(t, undefined, { kind: 'plugin' });
+    const base = '/api/resource/v1/catalog/packages';
+    const pack = {
+      id: f.packageId,
+      ownerId: f.who.ownerId,
+      tenantId: f.who.tenantId,
+      kind: 'plugin',
+      name: f.manifest.name,
+      revision: 1,
+    };
+    const goodVersion = {
+      id: f.versionId,
+      packageId: f.packageId,
+      kind: 'plugin',
+      version: f.manifest.version,
+      revision: 1,
+      state: 'draft',
+      digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+      manifest: f.manifest,
+    };
+    const badVersion = {
+      ...goodVersion,
+      ...(mode === 'upload-missing' ? { manifest: undefined } : {}),
+      ...(mode === 'upload-conflict' || mode === 'submit-conflict'
+        ? {
+            manifest: {
+              ...f.manifest,
+              artifacts: [
+                {
+                  ...f.manifest.artifacts[0],
+                  digest: 'sha256:' + 'f'.repeat(64),
+                },
+              ],
+            },
+          }
+        : {}),
+      ...(mode === 'upload-role'
+        ? {
+            manifest: {
+              ...f.manifest,
+              artifacts: [{ ...f.manifest.artifacts[0], role: 'signature' }],
+            },
+          }
+        : {}),
+    };
+    const s = catalogService({
+      ...f,
+      privateSkills: {},
+      host: {},
+      fetchImpl: async (url) => {
+        if (url.pathname === base) return Response.json(pack, { status: 201 });
+        if (url.pathname.endsWith('/versions'))
+          return Response.json(
+            mode === 'submit-conflict' ? goodVersion : badVersion,
+            { status: 201 },
+          );
+        return Response.json(
+          {
+            authorId: f.who.ownerId,
+            reviewId: '019a0000-0000-7000-8000-000000000055',
+            status: 'pending',
+            version: { ...badVersion, state: 'pending_review' },
+          },
+          { status: 201 },
+        );
+      },
+    });
+    await assert.rejects(
+      s.submitPrepared({
+        manifest: f.manifest,
+        archive: f.archive,
+        key: 'bad-' + mode,
+        reason: 'review',
+      }),
+      { code: 'resource.digest_mismatch' },
+    );
+  }
 });

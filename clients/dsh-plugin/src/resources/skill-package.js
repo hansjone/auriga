@@ -4,13 +4,35 @@ import { validatePrivateSkill } from './private-skills.js';
 import { refuse } from './trust.js';
 import { encodeUstar } from './ustar.js';
 const decoder = new TextDecoder('utf-8', { fatal: true });
+export const skillRootDependencyFiles = new Set([
+  'requirements.txt',
+  'pyproject.toml',
+  'package.json',
+  'uv.lock',
+  'poetry.lock',
+]);
+
+/** @param {string} part @param {boolean} scriptPath */
+function hasDisallowedSkillChar(part, scriptPath) {
+  return [...part].some((c) => {
+    const code = c.codePointAt(0) ?? 0;
+    if (scriptPath) {
+      return !(
+        (code >= 0x20 && code <= 0x7e) ||
+        (code >= 0x4e00 && code <= 0x9fff)
+      );
+    }
+    return code < 32 || (code >= 0x7f && code <= 0x9f);
+  });
+}
+
 /** @param {string} path */
-export function skillPathValid(path) {
+export function skillDirectoryValid(path) {
+  const isScript = path === 'scripts' || path.startsWith('scripts/');
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&
-    (path === 'SKILL.md' ||
-      /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/.test(path)) &&
+    /^(?:references|assets|scripts)(?:\/.+)?$/.test(path) &&
     path
       .split('/')
       .every(
@@ -20,7 +42,69 @@ export function skillPathValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          ![...p].some((c) => c.charCodeAt(0) < 32) &&
+          !hasDisallowedSkillChar(p, isScript) &&
+          !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
+      )
+  );
+}
+
+const docExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml']);
+const scriptExtensions = new Set([
+  ...docExtensions,
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.csv',
+  '.sql',
+  '.py',
+  '.sh',
+  '.bash',
+  '.ps1',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.lock',
+]);
+
+/** @param {string} path */
+function collisionKey(path) {
+  return path.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+}
+
+/** @param {string} path */
+function extensionExact(path) {
+  const slash = path.lastIndexOf('/');
+  const dot = path.lastIndexOf('.');
+  return dot > slash ? path.slice(dot) : '';
+}
+
+/** @param {string} path */
+export function skillPathValid(path) {
+  const extExact = extensionExact(path);
+  const extLower = extExact.toLowerCase();
+  const allowed =
+    path === 'SKILL.md' ||
+    skillRootDependencyFiles.has(path) ||
+    ((path.startsWith('references/') || path.startsWith('assets/')) &&
+      docExtensions.has(extExact)) ||
+    (path.startsWith('scripts/') && scriptExtensions.has(extLower));
+  return (
+    Buffer.byteLength(path) <= 240 &&
+    path.split('/').length <= 8 &&
+    allowed &&
+    path
+      .split('/')
+      .every(
+        (p) =>
+          p &&
+          p !== '.' &&
+          p !== '..' &&
+          !/[. ]$/.test(p) &&
+          !/[\\:]/.test(p) &&
+          !hasDisallowedSkillChar(p, path.startsWith('scripts/')) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );
@@ -30,15 +114,16 @@ function validateFiles(files, expected) {
   const seen = new Set();
   let total = 0;
   for (const [path, bytes] of Object.entries(files)) {
+    const key = collisionKey(path);
     if (
       !skillPathValid(path) ||
-      seen.has(path.normalize('NFC').toLowerCase()) ||
+      seen.has(key) ||
       bytes.length > (path === 'SKILL.md' ? 262144 : 2097152) ||
       (total += bytes.length) > 20971520 ||
       decoder.decode(bytes).includes('\0')
     )
       refuse('common.validation_failed');
-    seen.add(path.normalize('NFC').toLowerCase());
+    seen.add(key);
   }
   if (!files['SKILL.md'] || seen.size > 512) refuse('common.validation_failed');
   const meta = validatePrivateSkill(decoder.decode(files['SKILL.md']));
@@ -54,7 +139,7 @@ export function unpackSkill(archive, expected) {
   if (tar.length % 512 || tar.length > archive.length * 100)
     refuse('common.validation_failed');
   /** @type {Record<string,Buffer>} */ const files = Object.create(null);
-  const seen = new Set();
+  /** @type {Map<string, boolean>} */ const seen = new Map();
   let pos = 0,
     entries = 0,
     ended = false;
@@ -84,26 +169,28 @@ export function unpackSkill(archive, expected) {
     const prefix = string(h.subarray(345, 500)),
       leaf = string(h.subarray(0, 100));
     const path = (prefix ? prefix + '/' : '') + leaf;
-    const key = path.replace(/\/$/, '').normalize('NFC').toLowerCase();
     const size = octal(h.subarray(124, 136)),
       mode = octal(h.subarray(100, 108)),
       type = h[156];
+    const isDir = type === 53;
+    const key = collisionKey(path.replace(/\/$/, ''));
     if (
       seen.has(key) ||
-      mode & 0o7111 ||
+      [...seen.entries()].some(
+        ([existing, existingDir]) =>
+          (!existingDir && key.startsWith(existing + '/')) ||
+          (!isDir && existing.startsWith(key + '/')),
+      ) ||
+      mode & 0o7000 ||
+      (!isDir && mode & 0o111) ||
       pos + Math.ceil(size / 512) * 512 > tar.length ||
       h.subarray(157, 257).some((b) => b !== 0)
     )
       refuse('common.validation_failed');
-    seen.add(key);
+    seen.set(key, isDir);
     if (type === 53) {
       const dir = path.replace(/\/$/, '');
-      if (
-        size ||
-        !['references', 'assets'].includes(dir.split('/')[0]) ||
-        !skillPathValid(dir + '/file.txt')
-      )
-        refuse('common.validation_failed');
+      if (size || !skillDirectoryValid(dir)) refuse('common.validation_failed');
     } else {
       if (![0, 48].includes(type) || !skillPathValid(path))
         refuse('common.validation_failed');

@@ -13,22 +13,21 @@ export function invalid(path, reason) {
 
 /** @param {string} path */
 export function safePath(path) {
-  return path
-    .split('/')
-    .every(
-      (part) =>
-        part &&
-        part !== '.' &&
-        part !== '..' &&
-        !/[. ]$/.test(part) &&
-        !/[\\:<>"|?*]/.test(part) &&
-        ![...part].some(
-          (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
-        ) &&
-        !/^(?:con|prn|aux|nul|conin\$|conout\$|(?:com|lpt)[1-9¹²³])(?:\.|$)/i.test(
-          part,
-        ),
-    );
+  return path.split('/').every(
+    (part) =>
+      part &&
+      part !== '.' &&
+      part !== '..' &&
+      !/[. ]$/.test(part) &&
+      !/[\\:<>"|?*]/.test(part) &&
+      ![...part].some((c) => {
+        const code = c.charCodeAt(0);
+        return code < 32 || (code >= 0x7f && code <= 0x9f);
+      }) &&
+      !/^(?:con|prn|aux|nul|conin\$|conout\$|(?:com|lpt)[1-9¹²³])(?:\.|$)/i.test(
+        part,
+      ),
+  );
 }
 
 /** @param {string} name */

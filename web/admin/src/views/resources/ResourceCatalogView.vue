@@ -28,7 +28,6 @@ import {
   textDiff,
 } from '../../admin/resourceCatalogPolicy';
 import {
-  skillPreview,
   archivePreviewWithMeta,
   type PreviewFile,
 } from '../../admin/resourceSkillPreview';
@@ -274,13 +273,30 @@ const changes = computed(() =>
       ...previous.value.map((f) => f.path),
       ...files.value.map((f) => f.path),
     ]),
-  ].map((path) => ({
-    path,
-    lines: textDiff(
-      previous.value.find((f) => f.path === path)?.text ?? '',
-      files.value.find((f) => f.path === path)?.text ?? '',
-    ),
-  })),
+  ].map((path) => {
+    const prevFile = previous.value.find((f) => f.path === path);
+    const currFile = files.value.find((f) => f.path === path);
+    const lines = textDiff(prevFile?.text ?? '', currFile?.text ?? '');
+    if (
+      !lines.some((l) => l.changed) &&
+      (prevFile?.truncated || currFile?.truncated) &&
+      (prevFile?.contentHash !== currFile?.contentHash ||
+        prevFile?.sizeBytes !== currFile?.sizeBytes)
+    ) {
+      return {
+        path,
+        lines: [
+          {
+            line: 0,
+            before: `[截断预览外内容已变更 · 旧版 ${prevFile?.sizeBytes ?? 0} bytes · hash ${prevFile?.contentHash ?? '-'}]`,
+            after: `[截断预览外内容已变更 · 新版 ${currFile?.sizeBytes ?? 0} bytes · hash ${currFile?.contentHash ?? '-'}]`,
+            changed: true,
+          },
+        ],
+      };
+    }
+    return { path, lines };
+  }),
 );
 function failure(e: unknown) {
   if (isApiError(e)) {
@@ -643,18 +659,13 @@ async function preview(compare = false, targetVersionId?: string) {
       );
       if (currPayload) {
         const currResp = await api.artifact(v.packageId, v.id, currPayload.id);
-        if (v.kind === 'plugin') {
-          const currMeta = await archivePreviewWithMeta(currResp, 'plugin');
-          if (alive && e === detailEpoch && currEpoch === previewEpoch) {
-            files.value = currMeta.files;
-            currentTruncated.value = currMeta.truncated;
-          }
-        } else {
-          const currFiles = await skillPreview(currResp);
-          if (alive && e === detailEpoch && currEpoch === previewEpoch) {
-            files.value = currFiles;
-            currentTruncated.value = false;
-          }
+        const currMeta = await archivePreviewWithMeta(
+          currResp,
+          v.kind === 'plugin' ? 'plugin' : 'skill',
+        );
+        if (alive && e === detailEpoch && currEpoch === previewEpoch) {
+          files.value = currMeta.files;
+          currentTruncated.value = currMeta.truncated;
         }
       }
     }
@@ -671,15 +682,12 @@ async function preview(compare = false, targetVersionId?: string) {
     const payload = value.manifest.artifacts.find((a) => a.role === 'payload');
     if (!payload) throw new Error('Missing payload');
     const resp = await api.artifact(value.packageId, value.id, payload.id);
-    let result: PreviewFile[];
-    let truncated = false;
-    if (value.kind === 'plugin') {
-      const meta = await archivePreviewWithMeta(resp, 'plugin');
-      result = meta.files;
-      truncated = meta.truncated;
-    } else {
-      result = await skillPreview(resp);
-    }
+    const meta = await archivePreviewWithMeta(
+      resp,
+      value.kind === 'plugin' ? 'plugin' : 'skill',
+    );
+    const result = meta.files;
+    const truncated = meta.truncated;
     if (isCurrent()) {
       if (compare) {
         previous.value = result;

@@ -102,6 +102,45 @@ export async function packSkillFolder(files: File[]): Promise<File> {
     if (!root || !relative.startsWith(root + '/')) throw invalid();
     const path = relative.slice(root.length + 1),
       parts = path.split('/');
+    const slash = path.lastIndexOf('/');
+    const dot = path.lastIndexOf('.');
+    const extExact = dot > slash ? path.slice(dot) : '';
+    const ext = extExact.toLowerCase();
+    const allowedSkillPath =
+      path === 'SKILL.md' ||
+      [
+        'requirements.txt',
+        'pyproject.toml',
+        'package.json',
+        'uv.lock',
+        'poetry.lock',
+      ].includes(path) ||
+      ((path.startsWith('references/') || path.startsWith('assets/')) &&
+        ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)) ||
+      (path.startsWith('scripts/') &&
+        [
+          '.py',
+          '.sh',
+          '.bash',
+          '.ps1',
+          '.js',
+          '.mjs',
+          '.cjs',
+          '.ts',
+          '.mts',
+          '.cts',
+          '.md',
+          '.txt',
+          '.json',
+          '.yaml',
+          '.yml',
+          '.toml',
+          '.ini',
+          '.cfg',
+          '.csv',
+          '.sql',
+          '.lock',
+        ].includes(ext));
     if (
       parts.length > 8 ||
       encoder.encode(path).length > 240 ||
@@ -111,23 +150,39 @@ export async function packSkillFolder(files: File[]): Promise<File> {
           p === '.' ||
           p === '..' ||
           /[\\:<>"|?*]/.test(p) ||
-          [...p].some((c) => c.charCodeAt(0) < 32) ||
+          [...p].some((c) => {
+            const code = c.codePointAt(0) ?? 0;
+            if (path.startsWith('scripts/')) {
+              return !(
+                (code >= 0x20 && code <= 0x7e) ||
+                (code >= 0x4e00 && code <= 0x9fff)
+              );
+            }
+            return code < 32 || (code >= 0x7f && code <= 0x9f);
+          }) ||
           /[. ]$/.test(p) ||
           /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p),
       ) ||
-      !(
-        path === 'SKILL.md' ||
-        /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/i.test(path)
-      ) ||
+      !allowedSkillPath ||
       file.size > (path === 'SKILL.md' ? 262144 : 2 * 1024 * 1024)
     )
       throw invalid();
-    const normalized = path.normalize('NFC').toLowerCase();
+    const normalized = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (seen.has(normalized)) throw invalid();
     seen.add(normalized);
     for (let i = 1; i < parts.length; i++)
       directories.add(
-        parts.slice(0, i).join('/').normalize('NFC').toLowerCase(),
+        parts
+          .slice(0, i)
+          .join('/')
+          .normalize('NFC')
+          .toUpperCase()
+          .toLowerCase()
+          .normalize('NFC'),
       );
     entries.push({ path, file });
     size += 512 + Math.ceil(file.size / 512) * 512;
@@ -146,12 +201,7 @@ export async function packSkillFolder(files: File[]): Promise<File> {
   )) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (
-      [...text].some(
-        (c) => c.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(c),
-      )
-    )
-      throw invalid();
+    if (text.includes('\0')) throw invalid();
     const header = tar.subarray(offset, offset + 512);
     const put = (s: string, at: number) => header.set(encoder.encode(s), at);
     const octal = (n: number, width: number) =>

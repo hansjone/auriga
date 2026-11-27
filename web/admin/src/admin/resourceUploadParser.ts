@@ -92,7 +92,7 @@ function validRange(value: unknown): value is string {
 }
 function safePath(path: string) {
   // eslint-disable-next-line no-control-regex
-  const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f]/;
+  const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f-\x9f]/;
   if (
     !path ||
     path.startsWith('/') ||
@@ -228,14 +228,33 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
       fail('pathUnsafe', path);
     if (
       kind === 'skill' &&
+      (path === 'scripts' || path.startsWith('scripts/')) &&
+      [...path].some((c) => {
+        const code = c.codePointAt(0) ?? 0;
+        return !(
+          (code >= 0x20 && code <= 0x7e) ||
+          (code >= 0x4e00 && code <= 0x9fff)
+        );
+      })
+    )
+      fail('pathUnsafe', path);
+    if (
+      kind === 'skill' &&
       directory &&
-      path !== 'references' &&
-      path !== 'assets' &&
-      !path.startsWith('references/') &&
-      !path.startsWith('assets/')
+      (path.split('/').length > 8 ||
+        (path !== 'references' &&
+          path !== 'assets' &&
+          path !== 'scripts' &&
+          !path.startsWith('references/') &&
+          !path.startsWith('assets/') &&
+          !path.startsWith('scripts/')))
     )
       fail('skillFileInvalid', path);
-    const key = path.normalize('NFC').toLowerCase();
+    const key = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (
       seen.has(key) ||
       [...seen].some(
@@ -254,7 +273,8 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
       end > raw.length
     )
       fail('archiveInvalid');
-    if (kind === 'skill' && !directory && octal(100, 108) & 0o111)
+    const mode = octal(100, 108);
+    if (kind === 'skill' && (mode & 0o7000 || (!directory && mode & 0o111)))
       fail('archiveUnsafe');
     if (!directory) {
       if (kind === 'plugin' && path.endsWith('/package.json')) {
@@ -471,6 +491,17 @@ export async function parseResourceSource(
     for (const e of listed) {
       safePath(e.path);
       if (
+        (e.path === 'scripts' || e.path.startsWith('scripts/')) &&
+        [...e.path].some((c) => {
+          const code = c.codePointAt(0) ?? 0;
+          return !(
+            (code >= 0x20 && code <= 0x7e) ||
+            (code >= 0x4e00 && code <= 0x9fff)
+          );
+        })
+      )
+        fail('pathUnsafe', e.path);
+      if (
         e.file.size >
         (e.path === 'SKILL.md' || e.path === 'auriga.manifest.json'
           ? 262144
@@ -556,25 +587,71 @@ export async function parseResourceSource(
     skillFiles = [];
     for (const e of entries) {
       safePath(e.path);
-      const key = e.path.normalize('NFC').toLowerCase();
+      if (
+        (e.path === 'scripts' || e.path.startsWith('scripts/')) &&
+        [...e.path].some((c) => {
+          const code = c.codePointAt(0) ?? 0;
+          return !(
+            (code >= 0x20 && code <= 0x7e) ||
+            (code >= 0x4e00 && code <= 0x9fff)
+          );
+        })
+      )
+        fail('pathUnsafe', e.path);
+      const key = e.path
+        .normalize('NFC')
+        .toUpperCase()
+        .toLowerCase()
+        .normalize('NFC');
       if (seen.has(key)) fail('pathCollision', e.path);
       seen.add(key);
       if (e.path === 'auriga.manifest.json') continue;
       if (systemFile(e.path)) fail('systemFile', e.path);
-      if (
-        e.path.split('/').length > 8 ||
-        !(
-          e.path === 'SKILL.md' ||
-          /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/.test(e.path)
-        )
-      )
+      const slash = e.path.lastIndexOf('/');
+      const dot = e.path.lastIndexOf('.');
+      const extExact = dot > slash ? e.path.slice(dot) : '';
+      const ext = extExact.toLowerCase();
+      const allowedSkillPath =
+        e.path === 'SKILL.md' ||
+        [
+          'requirements.txt',
+          'pyproject.toml',
+          'package.json',
+          'uv.lock',
+          'poetry.lock',
+        ].includes(e.path) ||
+        ((e.path.startsWith('references/') || e.path.startsWith('assets/')) &&
+          ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)) ||
+        (e.path.startsWith('scripts/') &&
+          [
+            '.py',
+            '.sh',
+            '.bash',
+            '.ps1',
+            '.js',
+            '.mjs',
+            '.cjs',
+            '.ts',
+            '.mts',
+            '.cts',
+            '.md',
+            '.txt',
+            '.json',
+            '.yaml',
+            '.yml',
+            '.toml',
+            '.ini',
+            '.cfg',
+            '.csv',
+            '.sql',
+            '.lock',
+          ].includes(ext));
+      if (e.path.split('/').length > 8 || !allowedSkillPath)
         fail('skillFileInvalid', e.path);
       if (e.sizeBytes > (e.path === 'SKILL.md' ? 262144 : 2097152))
         fail('sizeLimit', e.path);
       const content = text(entryBytes(e), e.path);
-      // eslint-disable-next-line no-control-regex
-      if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(content))
-        fail('textInvalid', e.path);
+      if (content.includes('\0')) fail('textInvalid', e.path);
       skillFiles.push(skillFile(e.path, content));
     }
     base = {

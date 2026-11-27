@@ -229,29 +229,82 @@ export function createPrivateSkills({ home }) {
           path.split('/').length > 8 ||
           /[\\:]/.test(path) ||
           /~[0-9]/i.test(path) ||
-          [...path].some((c) => c.charCodeAt(0) < 32) ||
+          [...path].some((c) => {
+            const code = c.codePointAt(0) ?? 0;
+            if (path === 'scripts' || path.startsWith('scripts/')) {
+              return !(
+                (code >= 0x20 && code <= 0x7e) ||
+                (code >= 0x4e00 && code <= 0x9fff)
+              );
+            }
+            return code < 32 || (code >= 0x7f && code <= 0x9f);
+          }) ||
           /[. ]$/.test(entry.name) ||
           /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(entry.name)
         )
           refuse('common.validation_failed');
-        const key = path.normalize('NFC').toLowerCase();
+        const key = path
+          .normalize('NFC')
+          .toUpperCase()
+          .toLowerCase()
+          .normalize('NFC');
         if (seen.has(key)) refuse('common.validation_failed');
         seen.add(key);
         const target = join(parent, entry.name),
           stat = await lstat(target);
         if (stat.isSymbolicLink()) refuse('common.validation_failed');
         if (stat.isDirectory()) {
-          if (!['references', 'assets'].includes(path.split('/')[0]))
+          if (!['references', 'assets', 'scripts'].includes(path.split('/')[0]))
             refuse('common.validation_failed');
           await visit(target, path + '/');
         } else {
+          const slash = path.lastIndexOf('/');
+          const dot = path.lastIndexOf('.');
+          const extExact = dot > slash ? path.slice(dot) : '';
+          const ext = extExact.toLowerCase();
           if (
             !stat.isFile() ||
             stat.size > 2097152 ||
             (process.platform !== 'win32' && stat.mode & 0o111) ||
             (path !== 'SKILL.md' &&
-              (!/^(references|assets)\//.test(path) ||
-                !/\.(md|txt|json|yaml|yml)$/.test(path)))
+              ![
+                'requirements.txt',
+                'pyproject.toml',
+                'package.json',
+                'uv.lock',
+                'poetry.lock',
+              ].includes(path) &&
+              !(
+                (path.startsWith('references/') ||
+                  path.startsWith('assets/')) &&
+                ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)
+              ) &&
+              !(
+                path.startsWith('scripts/') &&
+                [
+                  '.py',
+                  '.sh',
+                  '.bash',
+                  '.ps1',
+                  '.js',
+                  '.mjs',
+                  '.cjs',
+                  '.ts',
+                  '.mts',
+                  '.cts',
+                  '.md',
+                  '.txt',
+                  '.json',
+                  '.yaml',
+                  '.yml',
+                  '.toml',
+                  '.ini',
+                  '.cfg',
+                  '.csv',
+                  '.sql',
+                  '.lock',
+                ].includes(ext)
+              ))
           )
             refuse('common.validation_failed');
           const bytes = await readFile(target);

@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 import { TextDecoder } from 'node:util';
 import { validatePrivateSkill } from './private-skills.js';
 import { schemaValid } from './schema.js';
-import { packSkill, skillPathValid } from './skill-package.js';
+import {
+  packSkill,
+  skillDirectoryValid,
+  skillPathValid,
+  skillRootDependencyFiles,
+} from './skill-package.js';
 import {
   excluded,
   invalid,
@@ -14,6 +19,31 @@ import { packPluginDirectory } from './submission-plugin.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const defaultDshRange = '>=0.2.1-rc.3';
+
+/** Skill-specific ignore filter: keeps shared excluded() outside scripts/, adds Python caches (__pycache__/venv),
+ * and allows non-env script configs (e.g. scripts/config.json) inside scripts/.
+ * @param {string} parent @param {string} name */
+function skillExcluded(parent, name) {
+  if (/^(?:__pycache__|venv)$/i.test(name)) return true;
+  if (parent === 'scripts' || parent.startsWith('scripts/')) {
+    return (
+      name.startsWith('.') ||
+      /^(?:node_modules|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile)$/i.test(
+        name,
+      ) ||
+      /\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|kdbx|sqlite3?|db|log|bak|tgz|zip)$/i.test(
+        name,
+      ) ||
+      /^(?:env|secrets?|credentials|tokens?|private[-_]?keys?|id_(?:rsa|ed25519|ecdsa))(?:\.|$)/i.test(
+        name,
+      ) ||
+      /^(?:config|settings|application|appsettings)\.(?:local|dev|development|prod|production|test)\.(?:json|toml|ini|ya?ml|properties)$/i.test(
+        name,
+      )
+    );
+  }
+  return excluded(name);
+}
 
 /** @param {ReturnType<typeof submissionFiles>} source */
 async function packSkillDirectory(source) {
@@ -28,21 +58,32 @@ async function packSkillDirectory(source) {
     if (!safePath(path)) invalid(path, 'unsafe skill path');
     const info = await source.stat(path, optional);
     if (!info) return;
-    const key = path.normalize('NFC').toLowerCase();
+    const key = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (names.has(key)) invalid(path, 'skill path collides with another entry');
     names.add(key);
     if (info.isDirectory()) {
-      if (path === 'SKILL.md' || !skillPathValid(path + '/file.txt'))
-        invalid(path, 'invalid skill directory or depth');
+      if (!skillDirectoryValid(path))
+        invalid(
+          path,
+          'unsupported skill directory (only references/, assets/, scripts/ are allowed)',
+        );
       for await (const name of source.children(path))
-        if (!excluded(name)) await visit(path + '/' + name);
+        if (!skillExcluded(path, name)) await visit(path + '/' + name);
       return;
     }
-    if (path === 'assets' || path === 'references')
+    if (path === 'assets' || path === 'references' || path === 'scripts')
       invalid(path, 'expected a skill directory');
-    if (!/\.(?:md|txt|json|yaml|yml)$/.test(path)) return;
-    if (!skillPathValid(path) || ++count > 512)
-      invalid(path, 'skill path or entry count exceeds the package limit');
+    if (!skillPathValid(path))
+      invalid(
+        path,
+        'unsupported skill file path or extension (allowed: SKILL.md, root requirements.txt/pyproject.toml/package.json/uv.lock/poetry.lock, references/assets text files, and scripts/ UTF-8 scripts)',
+      );
+    if (++count > 512)
+      invalid(path, 'skill entry count exceeds the package limit (512)');
     const padded = 512 + Math.ceil(Number(info.size) / 512) * 512;
     if ((total += padded) > 20971520)
       invalid(path, 'skill archive size limit exceeded');
@@ -59,20 +100,27 @@ async function packSkillDirectory(source) {
     files[path] = bytes;
   }
 
-  await visit('SKILL.md');
-  await visit('references', true);
-  await visit('assets', true);
+  for await (const name of source.children('')) {
+    if (!skillExcluded('', name)) await visit(name);
+  }
+  if (!files['SKILL.md'])
+    invalid('SKILL.md', 'missing required SKILL.md at skill root');
   let skill;
   try {
     skill = validatePrivateSkill(decoder.decode(files['SKILL.md']));
   } catch {
     invalid('SKILL.md', 'invalid skill front matter');
   }
+  const packedFiles = Object.keys(files);
+  const hasScripts = packedFiles.some(
+    (p) => p.startsWith('scripts/') || skillRootDependencyFiles.has(p),
+  );
   try {
     return {
       skill,
       archive: packSkill(files, skill),
-      files: Object.keys(files),
+      files: packedFiles,
+      hasScripts,
     };
   } catch {
     invalid(
@@ -148,6 +196,7 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     license,
     archive,
     files,
+    hasScripts = false,
     detail,
     dshVersionRange;
   if (kind === 'plugin') {
@@ -190,7 +239,9 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
       skill,
       archive: payload,
       files: packedFiles,
+      hasScripts: skillHasScripts,
     } = await packSkillDirectory(source);
+    hasScripts = skillHasScripts;
     if (
       (metadata.name !== undefined && metadata.name !== skill.name) ||
       (metadata.description !== undefined &&
@@ -311,6 +362,7 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     manifest,
     archive,
     files,
+    hasScripts,
     ...(metadata.changeNotes
       ? { changeNotes: metadata.changeNotes.trim() }
       : {}),

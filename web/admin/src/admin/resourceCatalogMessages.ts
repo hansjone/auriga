@@ -127,7 +127,7 @@ export const catalogMessages = {
     parse_pathCollision: '存在重名文件或文件与目录冲突：{path}',
     parse_systemFile: '请移除系统文件后重新选择：{path}',
     parse_skillFileInvalid:
-      '技能仅允许 SKILL.md 和 references/assets 下的 md/txt/json/yaml/yml 文本文件：{path}',
+      '技能仅允许 SKILL.md、根目录依赖清单（requirements.txt/pyproject.toml/package.json 等）、references/assets 文本文件及 scripts 下的 UTF-8 脚本：{path}',
     parse_sizeLimit:
       '文件超过上传大小限制：{path}（插件 64 MiB，技能压缩包 5 MiB，正文 256 KiB，附件 2 MiB）。',
     parse_expandedLimit: '解压内容过大或压缩比超过 100，请缩小内容后重试。',
@@ -436,7 +436,7 @@ export const catalogMessages = {
     parse_pathCollision: 'Duplicate or conflicting path: {path}',
     parse_systemFile: 'Remove this system file: {path}',
     parse_skillFileInvalid:
-      'Only SKILL.md and md/txt/json/yaml/yml files under references/assets are allowed: {path}',
+      'Only SKILL.md, root dependency manifests (requirements.txt/pyproject.toml/package.json), text files under references/assets, and UTF-8 scripts under scripts/ are allowed: {path}',
     parse_sizeLimit:
       'Upload size exceeded: {path} (plugin 64 MiB, skill archive 5 MiB, body 256 KiB, attachment 2 MiB).',
     parse_expandedLimit:

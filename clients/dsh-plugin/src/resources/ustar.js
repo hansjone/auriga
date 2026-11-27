@@ -8,7 +8,19 @@ export function encodeUstar(files, invalid) {
   for (const path of Object.keys(files).sort()) {
     const bytes = files[path],
       h = Buffer.alloc(512);
-    const split = Buffer.byteLength(path) <= 100 ? -1 : path.lastIndexOf('/');
+    let split = -1;
+    if (Buffer.byteLength(path) > 100) {
+      for (let i = path.indexOf('/'); i >= 0; i = path.indexOf('/', i + 1)) {
+        if (
+          Buffer.byteLength(path.slice(0, i)) <= 155 &&
+          Buffer.byteLength(path.slice(i + 1)) <= 100
+        ) {
+          split = i;
+          break;
+        }
+      }
+      if (split < 0) invalid(path);
+    }
     const leaf = split < 0 ? path : path.slice(split + 1),
       prefix = split < 0 ? '' : path.slice(0, split);
     if (Buffer.byteLength(leaf) > 100 || Buffer.byteLength(prefix) > 155)
