@@ -353,7 +353,9 @@ async function run() {
         }
         signal.throwIfAborted();
         row.attempted = true;
-        await relayApi.createPool(row.body, row.key, signal);
+        // Keep the persisted document (server may clamp effectiveAt) so a later
+        // interrupted-save readback still matches this attempt.
+        row.body = await relayApi.createPool(row.body, row.key, signal);
         row.status = 'saved';
       } catch (e) {
         row.status =

@@ -405,9 +405,9 @@ it('allows correcting a preflight conflict to a new alias and preserves the orig
   w.unmount();
 });
 it.each([
-  // Import mints effectiveAt at Date.now()-60s; compare against that instant.
+  // Import mints effectiveAt at Date.now()-60s; samePool allows ≤2m clamp skew.
   ['2025-12-31T23:59:00.12Z', true],
-  ['2025-12-31T23:59:00.120000001Z', false],
+  ['2025-12-31T23:56:59.120Z', false],
 ] as const)(
   'handles interrupted-save readback timestamp %s without resending',
   async (effectiveAt, same) => {

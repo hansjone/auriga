@@ -417,11 +417,6 @@ function askPool() {
     error.value = t('invalid');
     return;
   }
-  if (!selected.value) {
-    // Mint a slightly past effectiveAt at submit time so browser/server skew
-    // does not reject a brand-new public model.
-    body.price.effectiveAt = new Date(Date.now() - 60_000).toISOString();
-  }
   pending.value = writeIntent.createAction(
     'ai.providers.write',
     t('confirmSave', { name: body.id }),

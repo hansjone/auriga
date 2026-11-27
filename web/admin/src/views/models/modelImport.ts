@@ -69,8 +69,17 @@ function instant(value: string) {
     BigInt(milliseconds) * 1000000n + BigInt((match[2] ?? '').padEnd(9, '0'))
   );
 }
+// Matches ai-gateway priceEffectiveSkew: server may clamp a slightly-future
+// client effectiveAt down to now while keeping the same price.version.
+const priceEffectiveSkewNs = 120_000_000_000n;
+function sameEffectiveAt(a: string, b: string) {
+  const left = instant(a),
+    right = instant(b);
+  if (left === undefined || right === undefined) return false;
+  const delta = left > right ? left - right : right - left;
+  return delta <= priceEffectiveSkewNs;
+}
 export function samePool(a: RelayPool, b: RelayPool) {
-  const effectiveAt = instant(a.price.effectiveAt);
   return (
     a.id === b.id &&
     a.enabled === b.enabled &&
@@ -90,8 +99,7 @@ export function samePool(a: RelayPool, b: RelayPool) {
     a.price.outputMicrosPerMillionTokens ===
       b.price.outputMicrosPerMillionTokens &&
     a.price.version === b.price.version &&
-    effectiveAt !== undefined &&
-    effectiveAt === instant(b.price.effectiveAt)
+    sameEffectiveAt(a.price.effectiveAt, b.price.effectiveAt)
   );
 }
 function sameCapabilities(
