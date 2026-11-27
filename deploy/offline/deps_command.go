@@ -126,7 +126,7 @@ func depsSourceLabel(d *siteDeps, eco string) string {
 var depsPublicHosts = map[string][]string{
 	"go":     {"proxy.golang.org", "sum.golang.org"},
 	"web":    {"registry.npmjs.org"},
-	"java":   {"repo.maven.apache.org", "repo1.maven.org"},
+	"java":   {"repo.maven.apache.org", "repo1.maven.org", "nodejs.org", "registry.npmjs.org"},
 	"python": {"pypi.org", "files.pythonhosted.org"},
 }
 
@@ -230,6 +230,42 @@ func depsPrepareSettings(d *siteDeps, eco string, host func(string) (string, boo
 			}
 			values["AURIGA_MAVEN_MIRROR_URL"] = v
 		}
+		if d.Sources.NPM != nil {
+			registry, err := single("npm", d.Sources.NPM)
+			if err != nil {
+				return nil, nil, err
+			}
+			values["npm_config_registry"] = registry
+		}
+		if !d.AllowPublic {
+			values["AURIGA_JAVA_NO_PUBLIC"] = "1"
+		}
+		if !d.AllowPublic && d.Sources.Files != nil {
+			if err := checkDepsURL("deps.sources.files", *d.Sources.Files); err != nil {
+				return nil, nil, err
+			}
+			files, err := url.Parse(*d.Sources.Files)
+			if err != nil {
+				return nil, nil, err
+			}
+			switch {
+			case files.Scheme == "file":
+				info, err := os.Stat(files.Path)
+				if err != nil || !info.IsDir() {
+					return nil, nil, fmt.Errorf("deps.sources.files 的目录不可用 %s", files.Path)
+				}
+				if err := depsTrustedSourceCheck("deps.sources.files ", files.Path); err != nil {
+					return nil, nil, err
+				}
+				const mount = "/auriga-deps-sources/java-files"
+				extra = append(extra, mountArg(files.Path, mount, true)...)
+				values["AURIGA_JAVA_FILES"] = "file://" + mount
+			case isPublic(files):
+				return nil, nil, fmt.Errorf("allowPublic=false 时不能把公网默认源 %s 配为 deps.sources.files", files.Hostname())
+			default:
+				values["AURIGA_JAVA_FILES"] = *d.Sources.Files
+			}
+		}
 	case "python":
 		v, err := single("pypi", d.Sources.PyPI)
 		if err != nil {
@@ -268,8 +304,11 @@ func depsPrepareSettings(d *siteDeps, eco string, host func(string) (string, boo
 		}
 		extra = append(extra, mountArg(*d.CAFile, depsCAMount+"/ca.pem", true)...)
 		// Go 读 SSL_CERT_DIR 下全部证书并保留系统默认根证书文件；Node/corepack/pnpm
-		// 用 NODE_EXTRA_CA_CERTS 追加。Java 需要 JKS/PKCS12 信任库，第一版不自动转换。
+		// 用 NODE_EXTRA_CA_CERTS 追加。Java prepare 用挂载的 PEM 建立临时信任库。
 		extra = append(extra, "--env", "SSL_CERT_DIR="+depsCAMount, "--env", "NODE_EXTRA_CA_CERTS="+depsCAMount+"/ca.pem")
+		if eco == "java" {
+			extra = append(extra, "--env", "AURIGA_JAVA_CA_FILE="+depsCAMount+"/ca.pem")
+		}
 	}
 	lookup := func(name string) (string, bool) { v, ok := values[name]; return v, ok }
 	return lookup, extra, nil
