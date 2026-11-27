@@ -10,11 +10,17 @@ function harness(fetcher, locale = 'zh', gotoOverview, openLogin) {
   let cursor = 0,
     navigated;
   const React = {
+    Fragment: Symbol('Fragment'),
     createElement: (type, props, ...children) => ({
       type,
       props: props ?? {},
       children: children.flat(Infinity),
     }),
+    useRef(initial) {
+      const i = cursor++;
+      if (!(i in values)) values[i] = { current: initial };
+      return values[i];
+    },
     useState(initial) {
       const i = cursor++;
       if (!(i in values)) values[i] = initial;
