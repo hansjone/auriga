@@ -8,7 +8,7 @@ const unavailable = (code = 'common.unavailable') =>
 /** Fixed platform client. Desktop uses C's OS-authenticated IPC; managed native
  * composition supplies its file-bound state. Both validate the frozen business
  * and host DTOs from the same producer artifact.
- * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any,checkBusinessAccess?:()=>void}} options */
+ * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any,checkBusinessAccess?:()=>void,authWaitMs?:number}} options */
 export async function createBroker({
   ipc,
   validate,
@@ -17,6 +17,7 @@ export async function createBroker({
   signal,
   stateFactory,
   checkBusinessAccess,
+  authWaitMs = 8000,
 }) {
   /** @type {any} */ let receiver;
   /** @type {any} */ let disconnected;
@@ -89,9 +90,27 @@ export async function createBroker({
         },
       }
     : undefined;
+  /** @type {Set<(snapshot:any)=>void>} */ const changeListeners = new Set();
+  /** @type {any} */ let lastAuthenticatedSnapshot;
+  /** @type {string|null} */ let lastAuthenticatedKey = null;
+  const handleStateChange = (/** @type {any} */ next) => {
+    if (next?.state === 'authenticated') {
+      lastAuthenticatedSnapshot = next;
+      lastAuthenticatedKey = state?.authorization?.() ?? null;
+    } else if (next && next.state !== 'unreachable') {
+      lastAuthenticatedSnapshot = undefined;
+      lastAuthenticatedKey = null;
+    }
+    for (const listener of [...changeListeners]) listener(next);
+    onChange?.(next);
+  };
   const state = stateFactory
-    ? stateFactory({ onInvalidate, onChange })
-    : createShellState({ transport, onInvalidate, onChange });
+    ? stateFactory({ onInvalidate, onChange: handleStateChange })
+    : createShellState({
+        transport,
+        onInvalidate,
+        onChange: handleStateChange,
+      });
   const stop = () => {
     closed = true;
     shutdown.abort();
@@ -99,23 +118,69 @@ export async function createBroker({
   };
   signal?.addEventListener('abort', stop, { once: true });
   if (signal?.aborted) stop();
+  const sameAuthenticatedIdentity = (
+    /** @type {any} */ a,
+    /** @type {any} */ b,
+  ) =>
+    a?.state === 'authenticated' &&
+    b?.state === 'authenticated' &&
+    a.shellEpoch === b.shellEpoch &&
+    a.identity?.tenantId === b.identity?.tenantId &&
+    a.identity?.memberId === b.identity?.memberId &&
+    a.identity?.deviceId === b.identity?.deviceId &&
+    a.identity?.providerId === b.identity?.providerId &&
+    a.identity?.uacSessionBinding?.sourceSessionId ===
+      b.identity?.uacSessionBinding?.sourceSessionId &&
+    a.identity?.uacSessionBinding?.authGeneration ===
+      b.identity?.uacSessionBinding?.authGeneration;
   // Stop consumers immediately on shell invalidation even when the IPC producer
   // never settles. The producer still owns cancellation of its remote work.
-  async function pending(/** @type {()=>Promise<any>} */ work) {
+  async function pending(
+    /** @type {()=>Promise<any>} */ work,
+    { allowRevisionAdvance = false } = {},
+  ) {
+    const snapBefore = state.current();
+    const anchorAuthKey = state.authorization?.() ?? null;
     const check = state.fence();
+    const sameOrTransientUnreachable = (/** @type {any} */ next) => {
+      if (sameAuthenticatedIdentity(snapBefore, next)) return true;
+      return (
+        !stateFactory &&
+        next?.state === 'unreachable' &&
+        Boolean(anchorAuthKey) &&
+        state.authorization?.() === anchorAuthKey
+      );
+    };
+    const verify = () => {
+      try {
+        check();
+      } catch (error) {
+        if (allowRevisionAdvance && sameOrTransientUnreachable(state.current()))
+          return;
+        throw error;
+      }
+    };
     let off = () => {};
+    /** @type {(next:any)=>void} */ let onStateChange = () => {};
     /** @type {ReturnType<typeof setTimeout>|undefined} */ let timer;
     try {
       return await new Promise((resolve, reject) => {
-        off = state.subscribeInvalidation(() =>
-          reject(unavailable('common.unauthenticated')),
-        );
+        onStateChange = (next) => {
+          if (allowRevisionAdvance && !sameOrTransientUnreachable(next)) {
+            reject(unavailable('common.unauthenticated'));
+          }
+        };
+        if (allowRevisionAdvance) changeListeners.add(onStateChange);
+        off = state.subscribeInvalidation(() => {
+          if (allowRevisionAdvance && state.current()) return;
+          reject(unavailable('common.unauthenticated'));
+        });
         timer = setTimeout(() => reject(unavailable()), 30000);
         timer.unref();
-        check();
+        verify();
         Promise.resolve(work()).then((result) => {
           try {
-            check();
+            verify();
             resolve(result);
           } catch (error) {
             reject(error);
@@ -123,15 +188,92 @@ export async function createBroker({
         }, reject);
       });
     } finally {
+      changeListeners.delete(onStateChange);
       off();
       clearTimeout(timer);
     }
+  }
+  async function waitForAuthenticated(timeoutMs = authWaitMs) {
+    if (closed) throw unavailable('common.unauthenticated');
+    const initial = state.current();
+    if (initial?.state === 'authenticated') {
+      return {
+        anchorKey: state.authorization?.() ?? null,
+        anchorSnap: initial,
+      };
+    }
+    if (stateFactory) throw unavailable('common.unauthenticated');
+    const anchorKey = state.authorization?.() ?? null;
+    const anchorSnap = lastAuthenticatedSnapshot;
+    if (
+      initial?.state !== 'unreachable' ||
+      !anchorKey ||
+      anchorKey !== lastAuthenticatedKey ||
+      !anchorSnap
+    ) {
+      throw unavailable('common.unauthenticated');
+    }
+    await new Promise((resolve, reject) => {
+      let done = false;
+      /** @type {ReturnType<typeof setTimeout>|undefined} */ let timer;
+      const finish = (/** @type {() => void} */ fn) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        changeListeners.delete(check);
+        offInvalidation();
+        fn();
+      };
+      const check = () => {
+        if (closed)
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        const cur = state.current();
+        if (cur?.state === 'authenticated') {
+          if (
+            state.authorization?.() === anchorKey &&
+            sameAuthenticatedIdentity(anchorSnap, cur)
+          ) {
+            return finish(() => resolve(undefined));
+          }
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        }
+        if (
+          cur?.state !== 'unreachable' ||
+          state.authorization?.() !== anchorKey
+        ) {
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        }
+      };
+      changeListeners.add(check);
+      const offInvalidation = state.subscribeInvalidation(() => {
+        if (!state.current()) check();
+      });
+      timer = setTimeout(() => {
+        const cur = state.current();
+        finish(() =>
+          reject(
+            unavailable(
+              cur?.state === 'unreachable' &&
+                state.authorization?.() === anchorKey
+                ? 'common.unavailable'
+                : 'common.unauthenticated',
+            ),
+          ),
+        );
+      }, timeoutMs);
+      check();
+    });
+    return { anchorKey, anchorSnap };
   }
   const envelope = (requireAccess = true) => {
     if (requireAccess) checkBusinessAccess?.();
     const s = state.current();
     if (s?.state !== 'authenticated' || closed)
-      throw unavailable('common.unauthenticated');
+      throw unavailable(
+        !stateFactory && s?.state === 'unreachable'
+          ? 'common.unavailable'
+          : 'common.unauthenticated',
+      );
     return {
       protocolVersion: 1,
       requestId: randomUUID(),
@@ -203,24 +345,62 @@ export async function createBroker({
         throw unavailable('common.conflict');
     },
     async call(/** @type {string} */ operation, /** @type {any} */ input) {
-      const check = state.fence(),
-        command = { ...envelope(), call: { operation, input } };
-      validate('ShellAuthBusinessCall', command);
-      const result = await pending(() => ipc.call(command));
-      check();
-      validate('ShellAuthBusinessResult', result);
-      if (
-        result.requestId !== command.requestId ||
-        result.operation !== operation
-      )
-        throw unavailable('common.conflict');
-      if (result.error)
-        throw Object.assign(unavailable(result.error.code), {
-          status: result.error.upstreamStatus,
-          retryable: result.error.retryable,
-          ...(result.error.rule ? { rule: result.error.rule } : {}),
+      const anchor = await waitForAuthenticated();
+      const matchesAnchor = (/** @type {any} */ snap) =>
+        sameAuthenticatedIdentity(anchor.anchorSnap, snap) &&
+        (stateFactory || state.authorization?.() === anchor.anchorKey);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const snapBefore = state.current();
+        if (!matchesAnchor(snapBefore))
+          throw unavailable('common.unauthenticated');
+        const check = state.fence(),
+          command = { ...envelope(), call: { operation, input } };
+        validate('ShellAuthBusinessCall', command);
+        const result = await pending(() => ipc.call(command), {
+          allowRevisionAdvance: true,
         });
-      return result.output;
+        validate('ShellAuthBusinessResult', result);
+        if (
+          result.requestId !== command.requestId ||
+          result.operation !== operation
+        )
+          throw unavailable('common.conflict');
+        if (
+          attempt === 0 &&
+          result.error?.code === 'common.conflict' &&
+          result.error.retryable === true &&
+          result.error.upstreamStatus === undefined &&
+          snapBefore?.shellEpoch
+        ) {
+          const snapAfter = state.current();
+          if (
+            matchesAnchor(snapAfter) &&
+            snapAfter.revision !== snapBefore.revision
+          ) {
+            continue;
+          }
+        }
+        try {
+          check();
+        } catch (error) {
+          const cur = state.current();
+          const stillSameSession =
+            matchesAnchor(cur) ||
+            (!stateFactory &&
+              cur?.state === 'unreachable' &&
+              Boolean(anchor.anchorKey) &&
+              state.authorization?.() === anchor.anchorKey);
+          if (!stillSameSession) throw error;
+        }
+        if (result.error)
+          throw Object.assign(unavailable(result.error.code), {
+            status: result.error.upstreamStatus,
+            retryable: result.error.retryable,
+            ...(result.error.rule ? { rule: result.error.rule } : {}),
+          });
+        return result.output;
+      }
+      throw unavailable('common.conflict');
     },
     async register(/** @type {any} */ context) {
       const result = await host(

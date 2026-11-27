@@ -5,7 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fixture, login } from './fixtures.mjs';
+import { fixture, login, command } from './fixtures.mjs';
 import { BusinessProxy, mapBusinessError } from '../business.mjs';
 import { Streams } from '../streams.mjs';
 import { valid } from '../schema.mjs';
@@ -557,4 +557,687 @@ test('catalog upload sends fixed multipart and only returns recognized correctio
     ).error.rule,
     undefined,
   );
+});
+
+test('BusinessProxy self-heals expired access token and transient unreachable state on demand', async (t) => {
+  const f = fixture();
+  await login(f);
+  let refreshes = 0;
+  const originalRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => {
+    refreshes++;
+    return originalRefresh(...args);
+  };
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  // Simulate access token expiry while refresh_token is still valid.
+  f.broker.tokenUntil = f.broker.now() - 1000;
+  f.broker.tokenMonoUntil = f.broker.mono() - 1000;
+  assert.equal(f.broker.snapshot().state, 'reauth_required');
+  const healed = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(healed.output, healed.error?.code);
+  assert.equal(refreshes, 1);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+
+  // Simulate transient unreachable state recovering on demand.
+  f.broker.transition('unreachable', 'offline');
+  assert.equal(f.broker.snapshot().state, 'unreachable');
+  const recovered = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(recovered.output, recovered.error?.code);
+  assert.equal(refreshes, 2);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+});
+
+test('BusinessProxy transparently refreshes and replays safe upstream 401 calls but never replays non-idempotent POST', async (t) => {
+  const f = fixture();
+  await login(f);
+  f.platform.audience = async () => f.tokens;
+  let refreshes = 0;
+  const originalRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => {
+    refreshes++;
+    return {
+      ...(await originalRefresh(...args)),
+      access_token: 'refreshed-access-' + refreshes,
+    };
+  };
+  const seenAuth = [];
+  let getAttempts = 0;
+  let postNoIdemAttempts = 0;
+  const proxy = new BusinessProxy(f.broker, async (url, options) => {
+    seenAuth.push(options.headers.Authorization ?? options.headers.authorization);
+    if (options.method === 'GET') {
+      getAttempts++;
+      if (getAttempts === 1) {
+        return new Response(
+          JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return Response.json({ items: [] });
+    }
+    postNoIdemAttempts++;
+    return new Response(
+      JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  const getRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(getRes.output, getRes.error?.code);
+  assert.equal(getAttempts, 2);
+  assert.equal(refreshes, 1);
+  assert.notEqual(seenAuth[0], seenAuth[1]);
+
+  // Non-idempotent POST without idempotency-key must NOT replay on 401.
+  const postRes = await proxy.call(
+    call(f.broker, 'createAiChatCompletion', {
+      body: {
+        model: 'test',
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+    }),
+    OWNER,
+  );
+  assert.equal(postRes.error?.code, 'common.unauthenticated');
+  assert.equal(postNoIdemAttempts, 1);
+});
+
+test('in-flight business call survives transient unreachable but aborts on explicit logout', async (t) => {
+  const f = fixture();
+  await login(f);
+  let releaseFirst;
+  let secondAborted = false;
+  let callIndex = 0;
+  const proxy = new BusinessProxy(f.broker, async (_url, options) => {
+    const idx = ++callIndex;
+    if (idx === 1) {
+      await new Promise((resolve, reject) => {
+        releaseFirst = resolve;
+        options.signal.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        );
+      });
+      return Response.json({ items: [] });
+    }
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        secondAborted = true;
+        reject(new Error('aborted'));
+      });
+    });
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  const projection = structuredClone(f.broker.projection);
+  const first = proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  // Transient unreachable + recovery should NOT abort the in-flight call.
+  f.broker.transition('unreachable', 'offline');
+  f.broker.transition('authenticated', undefined, projection);
+  releaseFirst();
+  const firstRes = await first;
+  assert.ok(firstRes.output, firstRes.error?.code);
+
+  // Explicit logout MUST abort an in-flight call immediately.
+  const second = proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  await f.broker.logout();
+  const secondRes = await second;
+  assert.equal(secondAborted, true);
+  assert.ok(
+    ['common.unauthenticated', 'common.unavailable'].includes(
+      secondRes.error?.code,
+    ),
+  );
+});
+
+test('BusinessProxy distinguishes network unavailable from revoked credentials during self-heal', async (t) => {
+  const f = fixture();
+  await login(f);
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // Network outage during refresh -> common.unavailable (not unauthenticated).
+  f.platform.refresh = async () => {
+    throw Object.assign(new Error('connect ECONNREFUSED'), { status: 503 });
+  };
+  f.broker.transition('unreachable', 'offline');
+  const offlineRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    OWNER,
+  );
+  assert.equal(offlineRes.error?.code, 'common.unavailable');
+
+  // Real remote revocation (401) -> common.unauthenticated and broker enters revoked.
+  f.platform.refresh = async () => {
+    throw Object.assign(new Error('revoked'), {
+      status: 401,
+      code: 'iam.invalid_token',
+    });
+  };
+  const revokedRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    OWNER,
+  );
+  assert.equal(revokedRes.error?.code, 'common.unauthenticated');
+  assert.equal(f.broker.snapshot().state, 'revoked');
+});
+
+test('BusinessProxy refuses stale revision self-heal after account switch and preserves replay transport errors', async (t) => {
+  const f = fixture();
+  await login(f);
+  const staleCall = call(f.broker, 'UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  let upstreamCalls = 0;
+  const proxy = new BusinessProxy(f.broker, async () => {
+    upstreamCalls++;
+    return Response.json({ items: [] });
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // Switch to another identity (B), then drop B to unreachable and replay A's stale revision.
+  await f.broker.logout();
+  f.identity.memberId = randomUUID();
+  await login(f);
+  f.broker.transition('unreachable', 'offline');
+  const staleRes = await proxy.call(staleCall, OWNER);
+  assert.ok(
+    ['common.conflict', 'common.unauthenticated'].includes(
+      staleRes.error?.code,
+    ),
+  );
+  assert.equal(upstreamCalls, 0);
+
+  // Restore B and verify transport error on 401 replay maps to retryable common.unavailable.
+  await f.broker.check(true);
+  let attempts = 0;
+  const replayProxy = new BusinessProxy(f.broker, async () => {
+    attempts++;
+    if (attempts === 1) {
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    throw new Error('ECONNRESET');
+  });
+  t.after(() => replayProxy.close());
+  const replayErr = await replayProxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.equal(attempts, 2);
+  assert.equal(replayErr.error?.code, 'common.unavailable');
+  assert.equal(replayErr.error?.retryable, true);
+});
+
+test('BusinessProxy preserves 401 mapping for managed authorities without self-heal methods', async (t) => {
+  const f = fixture();
+  await login(f);
+  const managedAuthority = {
+    epoch: f.broker.epoch,
+    revision: f.broker.revision,
+    platform: f.broker.platform,
+    on: f.broker.on.bind(f.broker),
+    off: f.broker.off.bind(f.broker),
+    guard: f.broker.guard.bind(f.broker),
+    assert: f.broker.assert.bind(f.broker),
+    tokenFor: f.broker.tokenFor.bind(f.broker),
+  };
+  const proxy = new BusinessProxy(
+    managedAuthority,
+    async () =>
+      new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      ),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  const res = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.equal(res.error?.code, 'common.unauthenticated');
+});
+
+test('BusinessProxy enforces absolute expiresAt after AI token exchange, maps AI exchange 5xx to unavailable, and rejects stale cached SSE stream', async (t) => {
+  const f = fixture();
+  await login(f);
+  let upstreamCalls = 0;
+  const proxy = new BusinessProxy(f.broker, async () => {
+    upstreamCalls++;
+    return new Response(
+      JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // 1) AI audience token exchange exceeds expiresAt -> never hits upstream.
+  f.platform.audience = async () => {
+    await new Promise((r) => setTimeout(r, 80));
+    return f.tokens;
+  };
+  const shortReq = {
+    ...call(f.broker, 'listAiModels', {}),
+    expiresAt: new Date(Date.now() + 30).toISOString(),
+  };
+  const expiredRes = await proxy.call(shortReq, OWNER);
+  assert.equal(expiredRes.error?.code, 'common.unavailable');
+  assert.equal(expiredRes.error?.retryable, true);
+  assert.equal(upstreamCalls, 0);
+
+  // 2) Upstream 401 on GET listAiModels -> refresh succeeds, AI audience exchange hits 503 -> common.unavailable (retryable).
+  let audienceCount = 0;
+  f.platform.audience = async () => {
+    audienceCount++;
+    if (audienceCount === 1) return f.tokens;
+    throw Object.assign(new Error('iam 503'), { status: 503 });
+  };
+  const ai503Res = await proxy.call(call(f.broker, 'listAiModels', {}), OWNER);
+  assert.equal(ai503Res.error?.code, 'common.unavailable');
+  assert.equal(ai503Res.error?.retryable, true);
+
+  // 3) Cached SSE stream request must not return a closed stream ID after same-identity revision advance.
+  f.platform.audience = async () => f.tokens;
+  const sseProxy = new BusinessProxy(
+    f.broker,
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from('data: {"ok":true}\n\ndata: [DONE]\n\n'));
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  );
+  t.after(() => sseProxy.close());
+  const sseReq = call(f.broker, 'createAiChatCompletionStream', {
+    body: {
+      model: 'test',
+      max_tokens: 16,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: true,
+    },
+  });
+  const firstSse = await sseProxy.call(sseReq, OWNER);
+  assert.ok(firstSse.output?.body?.streamId);
+  const projection = structuredClone(f.broker.projection);
+  f.broker.transition('authenticated', undefined, projection);
+  const cachedSse = await sseProxy.call(sseReq, OWNER);
+  assert.equal(cachedSse.error?.code, 'common.unauthenticated');
+});
+
+test('BusinessProxy preserves active revision past 60s, waits for rotated bearer when 401 interleaves with normal check, and avoids controller leak on expiry', async (t) => {
+  const f = fixture();
+  await login(f);
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // 1) Active revision remains valid for self-heal even after >60s steady uptime.
+  const revBeforeDrop = f.broker.revision;
+  const origMono = f.broker.mono.bind(f.broker);
+  let monoOffset = 120000;
+  f.broker.mono = () => origMono() + monoOffset;
+  f.broker.transition('unreachable', 'offline');
+  const healedAfter120s = await proxy.call(
+    {
+      ...call(f.broker, 'UnifiedListResourcePackages', {
+        limit: 10,
+        kind: 'skill',
+      }),
+      expectedRevision: revBeforeDrop,
+    },
+    OWNER,
+  );
+  assert.ok(healedAfter120s.output, healedAfter120s.error?.code);
+  f.broker.mono = origMono;
+
+  // 2) Normal check (reusing old token) interleaved with 401 forceRefresh must wait for rotated token.
+  let releaseProfile;
+  const origProfile = f.platform.profile.bind(f.platform);
+  let holdNextProfile = true;
+  f.platform.profile = async (...args) => {
+    if (holdNextProfile) {
+      holdNextProfile = false;
+      await new Promise((r) => {
+        releaseProfile = r;
+      });
+    }
+    return origProfile(...args);
+  };
+  const origRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => ({
+    ...(await origRefresh(...args)),
+    access_token: 'rotated-bearer-after-normal-check',
+  });
+  const normalCheck = f.broker.check(false);
+  await new Promise((r) => setTimeout(r, 10));
+  const seenBearers = [];
+  let attempts = 0;
+  const interleaveProxy = new BusinessProxy(f.broker, async (_url, options) => {
+    seenBearers.push(options.headers.Authorization);
+    attempts++;
+    if (attempts === 1) {
+      releaseProfile?.();
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ items: [] });
+  });
+  t.after(() => interleaveProxy.close());
+  const replayRes = await interleaveProxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await normalCheck;
+  assert.ok(replayRes.output, replayRes.error?.code);
+  assert.equal(attempts, 2);
+  assert.equal(seenBearers[1], 'Bearer rotated-bearer-after-normal-check');
+  assert.notEqual(seenBearers[0], seenBearers[1]);
+
+  // 3) Expired deadline before controller registration must not leak controller.
+  f.platform.audience = async () => {
+    await new Promise((r) => setTimeout(r, 50));
+    return f.tokens;
+  };
+  let fetched = 0;
+  const leakProxy = new BusinessProxy(f.broker, async () => {
+    fetched++;
+    return Response.json({ items: [] });
+  });
+  t.after(() => leakProxy.close());
+  const expRes = await leakProxy.call(
+    {
+      ...call(f.broker, 'listAiModels', {}),
+      expiresAt: new Date(Date.now() + 20).toISOString(),
+    },
+    OWNER,
+  );
+  assert.equal(expRes.error?.code, 'common.unavailable');
+  assert.equal(fetched, 0);
+  assert.equal(leakProxy.controllers.size, 0);
+
+  // 4) Hanging remote revocation from an earlier session must not block new account 401 refresh + AI audience exchange.
+  const f2 = fixture();
+  await login(f2);
+  let aiUpstreamAttempts = 0;
+  const aiProxy = new BusinessProxy(f2.broker, async () => {
+    aiUpstreamAttempts++;
+    if (aiUpstreamAttempts === 1) {
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ object: 'list', data: [] });
+  });
+  const pendingRevokes = [];
+  let allowRevoke = false;
+  let markRevokeEntered;
+  const revokeEntered = new Promise((resolve) => {
+    markRevokeEntered = resolve;
+  });
+  const releaseAllRevokes = () => {
+    allowRevoke = true;
+    while (pendingRevokes.length) pendingRevokes.shift()();
+  };
+  t.after(async () => {
+    releaseAllRevokes();
+    aiProxy.close();
+    await f2.broker.close();
+  });
+  f2.platform.revoke = () => {
+    if (allowRevoke) return Promise.resolve({ correlationId: randomUUID() });
+    markRevokeEntered?.();
+    return new Promise((resolve) => {
+      pendingRevokes.push(() => resolve({ correlationId: randomUUID() }));
+    });
+  };
+  await f2.broker.logout();
+  const pendingCheck = f2.broker.check();
+  await revokeEntered;
+  assert.ok(pendingRevokes.length >= 1);
+  // Re-login with a distinct account and fresh tokens while old revocation is still hanging.
+  f2.identity.memberId = randomUUID();
+  f2.tokens.access_token = 'account-b-access';
+  f2.tokens.refresh_token = 'account-b-refresh';
+  const authed = new Promise((resolve) => {
+    const onChange = (snap) => {
+      if (snap.state === 'authenticated') {
+        f2.broker.off('changed', onChange);
+        resolve();
+      }
+    };
+    f2.broker.on('changed', onChange);
+  });
+  await f2.broker.command(command(f2.broker, 'open_login'), OWNER);
+  await authed;
+  const origRefresh2 = f2.platform.refresh.bind(f2.platform);
+  f2.platform.refresh = async (...args) => ({
+    ...(await origRefresh2(...args)),
+    access_token: 'account-b-refreshed-access',
+  });
+  f2.platform.audience = async () => ({
+    ...f2.tokens,
+    access_token: 'account-b-ai-token',
+  });
+  const aiRes = await aiProxy.call(call(f2.broker, 'listAiModels', {}), OWNER);
+  assert.ok(aiRes.output, aiRes.error?.code);
+  assert.equal(aiUpstreamAttempts, 2);
+  assert.ok(pendingRevokes.length >= 1);
+  releaseAllRevokes();
+  await pendingCheck;
+
+  // 5) drainRevocations never sends remote revoke before queueRevoke commits to vault.
+  const f3 = fixture();
+  await login(f3);
+  let revokeCallsWhileSaving = 0;
+  let holdSave = true;
+  let releaseSave;
+  const origVaultSave = f3.vault.save.bind(f3.vault);
+  f3.vault.save = async (value) => {
+    if (holdSave && value.revocations?.length) {
+      holdSave = false;
+      await new Promise((r) => {
+        releaseSave = r;
+      });
+    }
+    return origVaultSave(value);
+  };
+  f3.platform.revoke = async () => {
+    revokeCallsWhileSaving++;
+    return { correlationId: randomUUID() };
+  };
+  t.after(async () => {
+    releaseSave?.();
+    await f3.broker.close();
+  });
+  const queuing = f3.broker.queueRevoke({
+    refresh_token: 'uncommitted-refresh',
+    access_token: 'uncommitted-access',
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  await f3.broker.drainRevocations();
+  assert.equal(revokeCallsWhileSaving, 0);
+  releaseSave?.();
+  await queuing;
+  assert.ok(revokeCallsWhileSaving >= 1);
+
+  // 6) Failed initial vault save followed by a subsequent successful save commits revocations for drain.
+  const f4 = fixture();
+  await login(f4);
+  let failOnce = true;
+  let f4Revokes = 0;
+  const origSave4 = f4.vault.save.bind(f4.vault);
+  f4.vault.save = async (value) => {
+    if (failOnce && value.revocations?.length) {
+      failOnce = false;
+      throw new Error('disk busy');
+    }
+    return origSave4(value);
+  };
+  f4.platform.revoke = async () => {
+    f4Revokes++;
+    return { correlationId: randomUUID() };
+  };
+  t.after(() => f4.broker.close());
+  await assert.rejects(
+    f4.broker.queueRevoke({ refresh_token: 'retry-save-token' }),
+  );
+  assert.equal(f4Revokes, 0);
+  await f4.broker.save();
+  await f4.broker.drainRevocations();
+  assert.equal(f4Revokes, 1);
+
+  // 7) Account B receiving 401 while account A's forceRefresh is still in flight must run its own generation refresh.
+  const f5 = fixture();
+  await login(f5);
+  let releaseRefreshA;
+  let refreshCallNum = 0;
+  const origRefresh5 = f5.platform.refresh.bind(f5.platform);
+  f5.platform.refresh = async (...args) => {
+    refreshCallNum++;
+    if (refreshCallNum === 1) {
+      await new Promise((r) => {
+        releaseRefreshA = r;
+      });
+      return {
+        ...(await origRefresh5(...args)),
+        access_token: 'stale-a-refresh',
+      };
+    }
+    return {
+      ...(await origRefresh5(...args)),
+      access_token: 'fresh-b-rotated-bearer',
+    };
+  };
+  const refreshA = f5.broker.refreshTokens(true);
+  await new Promise((r) => setTimeout(r, 10));
+  await f5.broker.logout();
+  f5.identity.memberId = randomUUID();
+  f5.tokens.access_token = 'initial-b-bearer';
+  f5.tokens.refresh_token = 'initial-b-refresh';
+  await login(f5);
+  const bBearers = [];
+  let bAttempts = 0;
+  const proxy5 = new BusinessProxy(f5.broker, async (_url, options) => {
+    bBearers.push(options.headers.Authorization);
+    bAttempts++;
+    if (bAttempts === 1) {
+      releaseRefreshA?.();
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ items: [] });
+  });
+  t.after(async () => {
+    releaseRefreshA?.();
+    proxy5.close();
+    await f5.broker.close();
+  });
+  const bRes = await proxy5.call(
+    call(f5.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await refreshA;
+  assert.ok(bRes.output, bRes.error?.code);
+  assert.equal(bAttempts, 2);
+  assert.equal(bBearers[1], 'Bearer fresh-b-rotated-bearer');
+
+  // 8) Queued refresh for account B waiting behind A must not refresh account C after switching to C.
+  const f6 = fixture();
+  await login(f6);
+  let releaseA6;
+  let refreshCalls6 = 0;
+  const origRefresh6 = f6.platform.refresh.bind(f6.platform);
+  f6.platform.refresh = async (...args) => {
+    refreshCalls6++;
+    if (refreshCalls6 === 1) {
+      await new Promise((r) => {
+        releaseA6 = r;
+      });
+    }
+    return origRefresh6(...args);
+  };
+  t.after(async () => {
+    releaseA6?.();
+    await f6.broker.close();
+  });
+  const inflightA6 = f6.broker.refreshTokens(true);
+  await new Promise((r) => setTimeout(r, 10));
+  await f6.broker.logout();
+  f6.identity.memberId = randomUUID();
+  await login(f6);
+  const queuedB6 = f6.broker.refreshTokens(true);
+  await f6.broker.logout();
+  f6.identity.memberId = randomUUID();
+  await login(f6);
+  releaseA6?.();
+  const [resA6, resB6] = await Promise.all([inflightA6, queuedB6]);
+  assert.equal(resA6.rotated, false);
+  assert.equal(resB6.rotated, false);
+  assert.equal(refreshCalls6, 1);
 });

@@ -118,6 +118,7 @@ export class Broker extends EventEmitter {
     this.cache = new Map();
     this.inflight = new Set();
     this.record = { manualLoginRequired: false, revocations: [] };
+    this.committedRevocations = new Set();
     this.persistence = Promise.resolve();
     this.health = Promise.resolve();
   }
@@ -125,13 +126,20 @@ export class Broker extends EventEmitter {
     const value = structuredClone(this.record);
     this.persistence = this.persistence
       .catch(() => {})
-      .then(() => this.vault.save(value));
+      .then(async () => {
+        await this.vault.save(value);
+        this.committedRevocations = new Set(
+          Array.isArray(value.revocations) ? value.revocations : [],
+        );
+      });
     return this.persistence;
   }
   async initialize() {
     this.record = (await this.vault.load()) ?? this.record;
     if (!Array.isArray(this.record.revocations))
       throw new Error('invalid vault');
+    for (const token of this.record.revocations)
+      this.committedRevocations.add(token);
     if (this.record.tokens && !this.record.manualLoginRequired) {
       this.state = 'unreachable';
       this.reason = 'shell_restarted';
@@ -140,13 +148,75 @@ export class Broker extends EventEmitter {
     await this.drainRevocations();
     return this;
   }
+  identityKey(projection = this.projection) {
+    const id = projection?.identity;
+    if (!id) return '';
+    return JSON.stringify([
+      id.tenantId,
+      id.memberId,
+      id.deviceId,
+      id.providerId,
+      id.uacSessionBinding?.sourceSessionId ?? null,
+      id.uacSessionBinding?.authGeneration ?? null,
+    ]);
+  }
+  canSelfHeal() {
+    if (this.closed) return false;
+    if (this.record.tokens && !this.record.manualLoginRequired) return true;
+    return Boolean(
+      this.localSource &&
+        this.liveLocalSource(this.localSource.owner) &&
+        !this.record.manualLoginRequired,
+    );
+  }
   transition(state, reason, projection) {
+    const previousIdentityKey =
+      this.identityKey(this.projection) || this.lastAuthenticatedIdentityKey;
+    const nextIdentityKey = this.identityKey(projection);
     const identity = projection?.identity ?? this.projection?.identity;
     if (state === 'authenticating' || !reason) this.loginError = undefined;
     this.state = state;
     this.reason = reason;
     this.projection = projection;
     this.revision++;
+    const generationChanged =
+      this.lastAuthenticatedGeneration !== undefined &&
+      this.generation !== this.lastAuthenticatedGeneration;
+    const identityChanged = Boolean(
+      previousIdentityKey &&
+        nextIdentityKey &&
+        previousIdentityKey !== nextIdentityKey,
+    );
+    const invalidated =
+      ['signed_out', 'revoked'].includes(state) ||
+      (state === 'reauth_required' && !this.canSelfHeal()) ||
+      generationChanged ||
+      identityChanged;
+    if (invalidated) {
+      this.lastAuthenticatedRevisions?.clear();
+      this.currentAuthenticatedRevision = undefined;
+      this.lastAuthenticatedIdentityKey = '';
+      this.lastAuthenticatedGeneration = undefined;
+    }
+    if (state === 'authenticated' && nextIdentityKey) {
+      this.lastAuthenticatedRevisions ??= new Map();
+      if (
+        this.lastAuthenticatedGeneration !== this.generation ||
+        this.lastAuthenticatedIdentityKey !== nextIdentityKey
+      ) {
+        this.lastAuthenticatedRevisions.clear();
+      }
+      this.lastAuthenticatedGeneration = this.generation;
+      this.lastAuthenticatedIdentityKey = nextIdentityKey;
+      this.recordAuthenticatedRevision(this.revision);
+    } else if (
+      !invalidated &&
+      ['unreachable', 'reauth_required'].includes(state) &&
+      this.lastAuthenticatedGeneration === this.generation &&
+      this.lastAuthenticatedIdentityKey
+    ) {
+      this.recordAuthenticatedRevision(this.revision);
+    }
     const snapshot = this.snapshot();
     this.log({
       ...(identity
@@ -160,6 +230,7 @@ export class Broker extends EventEmitter {
       correlationId: randomUUID(),
       revision: this.revision,
     });
+    if (invalidated) this.emit('identity_invalidated', snapshot);
     this.emit('changed', snapshot);
   }
   snapshot(pageOwner) {
@@ -224,7 +295,20 @@ export class Broker extends EventEmitter {
       identity: this.projection.identity,
     };
   }
-  assert(context) {
+  assert(context, { allowRevisionAdvance = false } = {}) {
+    if (allowRevisionAdvance) {
+      if (this.closed || this.snapshot().state !== 'authenticated')
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      if (
+        context.epoch !== this.epoch ||
+        context.generation !== this.generation ||
+        this.identityKey() !== this.identityKey({ identity: context.identity })
+      )
+        throw conflict();
+      return;
+    }
     this.guard(context.epoch, context.revision);
     if (context.generation !== this.generation) throw conflict();
   }
@@ -641,9 +725,20 @@ export class Broker extends EventEmitter {
     await this.drainRevocations();
   }
   async drainRevocations() {
-    if (this.draining) return this.draining;
+    if (this.draining) {
+      await this.draining;
+      if (
+        !this.closed &&
+        this.record.revocations.some((t) => this.committedRevocations.has(t))
+      ) {
+        return this.drainRevocations();
+      }
+      return;
+    }
     this.draining = (async () => {
-      for (const token of [...this.record.revocations].slice(0, 4)) {
+      for (const token of [...this.record.revocations]
+        .filter((t) => this.committedRevocations.has(t))
+        .slice(0, 4)) {
         const hash = createHash('sha256').update(token).digest('hex'),
           metadata = this.record.revocationBindings?.[hash] ?? {
             correlationId: randomUUID(),
@@ -662,6 +757,7 @@ export class Broker extends EventEmitter {
           this.record.revocations = this.record.revocations.filter(
             (t) => t !== token,
           );
+          this.committedRevocations.delete(token);
           if (this.record.revocationBindings)
             delete this.record.revocationBindings[hash];
           try {
@@ -669,6 +765,7 @@ export class Broker extends EventEmitter {
           } catch (error) {
             if (!this.record.revocations.includes(token))
               this.record.revocations.push(token);
+            this.committedRevocations.add(token);
             this.record.revocationBindings ??= {};
             this.record.revocationBindings[hash] = metadata;
             throw error;
@@ -929,16 +1026,282 @@ export class Broker extends EventEmitter {
     this.tokenUntil = verified.tokenUntil;
     this.sourceUntil = verified.sourceUntil;
     this.tokenMonoUntil = verified.tokenMonoUntil;
+    this.tokenLifetimeMs = Math.max(0, verified.tokenUntil - this.now());
   }
-  check() {
-    if (this.checking) return this.checking;
-    this.health = this.health.catch(() => {}).then(() => this.checkOnce());
+  check(forceRefresh = false) {
+    if (this.checking) {
+      if (forceRefresh && !this.checkingForce) {
+        return this.checking.finally(() => {}).then(() => this.check(true));
+      }
+      return this.checking;
+    }
+    this.checkingForce = forceRefresh;
+    this.health = this.health
+      .catch(() => {})
+      .then(() => this.checkOnce(forceRefresh));
     this.checking = this.health.finally(() => {
       this.checking = undefined;
+      this.checkingForce = false;
     });
     return this.checking;
   }
-  async checkOnce() {
+  recordAuthenticatedRevision(revision) {
+    this.lastAuthenticatedRevisions ??= new Map();
+    const now = this.mono();
+    if (
+      this.currentAuthenticatedRevision !== undefined &&
+      this.currentAuthenticatedRevision !== revision &&
+      this.lastAuthenticatedRevisions.has(this.currentAuthenticatedRevision)
+    ) {
+      this.lastAuthenticatedRevisions.set(
+        this.currentAuthenticatedRevision,
+        now + 60000,
+      );
+    }
+    this.currentAuthenticatedRevision = revision;
+    this.lastAuthenticatedRevisions.set(revision, Infinity);
+    for (const [rev, until] of this.lastAuthenticatedRevisions) {
+      if (rev !== revision && until <= now)
+        this.lastAuthenticatedRevisions.delete(rev);
+    }
+    while (this.lastAuthenticatedRevisions.size > 32) {
+      const oldest = [...this.lastAuthenticatedRevisions.keys()].find(
+        (k) => k !== revision,
+      );
+      if (oldest === undefined) break;
+      this.lastAuthenticatedRevisions.delete(oldest);
+    }
+  }
+  hasAuthenticatedRevision(revision) {
+    if (revision === this.currentAuthenticatedRevision) return true;
+    const until = this.lastAuthenticatedRevisions?.get(revision);
+    if (until === undefined) return false;
+    if (until <= this.mono()) {
+      this.lastAuthenticatedRevisions.delete(revision);
+      return false;
+    }
+    return true;
+  }
+  async ensureAuthenticated({
+    forceRefresh = false,
+    timeoutMs = 8000,
+    expectedRevision,
+    expectedGeneration,
+    expectedIdentityKey,
+  } = {}) {
+    if (this.closed)
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    const anchorGeneration =
+      expectedGeneration ?? this.lastAuthenticatedGeneration;
+    const anchorIdentityKey =
+      expectedIdentityKey ?? this.lastAuthenticatedIdentityKey;
+    if (
+      expectedRevision !== undefined &&
+      !this.hasAuthenticatedRevision(expectedRevision)
+    ) {
+      throw conflict();
+    }
+    if (
+      anchorGeneration === undefined ||
+      !anchorIdentityKey ||
+      this.generation !== anchorGeneration
+    ) {
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    }
+    const assertSameAnchor = () => {
+      if (
+        this.closed ||
+        this.generation !== anchorGeneration ||
+        this.identityKey() !== anchorIdentityKey
+      ) {
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      }
+    };
+    const currentState = this.snapshot().state;
+    const nearExpiry =
+      !Number.isFinite(this.tokenUntil) ||
+      this.tokenUntil - this.now() < 5000 ||
+      this.mono() >= this.tokenMonoUntil - 5000;
+    if (!forceRefresh && currentState === 'authenticated' && !nearExpiry) {
+      assertSameAnchor();
+      return this.guard();
+    }
+    if (!this.canSelfHeal()) {
+      if (currentState === 'unreachable') throw unavailable();
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    }
+    const deadline = this.mono() + Math.max(1000, timeoutMs);
+    let timer;
+    let onInvalidated;
+    let onRefreshed;
+    let refreshedResult;
+    try {
+      refreshedResult = await Promise.race([
+        this.refreshTokens(forceRefresh, anchorGeneration),
+        new Promise((resolve, reject) => {
+          onInvalidated = () =>
+            reject(
+              Object.assign(new Error('common.unauthenticated'), {
+                code: 'common.unauthenticated',
+              }),
+            );
+          onRefreshed = (info) => {
+            if (
+              info?.generation === anchorGeneration &&
+              (!forceRefresh || info?.rotated) &&
+              this.state === 'authenticated' &&
+              this.generation === anchorGeneration &&
+              this.identityKey() === anchorIdentityKey
+            ) {
+              resolve(info);
+            }
+          };
+          this.once('identity_invalidated', onInvalidated);
+          this.on('auth_refreshed', onRefreshed);
+          timer = setTimeout(
+            () => reject(unavailable()),
+            Math.max(1000, deadline - this.mono()),
+          );
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      if (onInvalidated) this.off('identity_invalidated', onInvalidated);
+      if (onRefreshed) this.off('auth_refreshed', onRefreshed);
+    }
+    const after = this.snapshot().state;
+    if (after === 'authenticated') {
+      assertSameAnchor();
+      if (
+        forceRefresh &&
+        (refreshedResult?.generation !== anchorGeneration ||
+          !refreshedResult?.rotated)
+      ) {
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      }
+      return this.guard();
+    }
+    if (after === 'unreachable') throw unavailable();
+    throw Object.assign(new Error('common.unauthenticated'), {
+      code: 'common.unauthenticated',
+    });
+  }
+  withTokenLock(work) {
+    const prev = this.tokenQueue ?? Promise.resolve();
+    const run = prev.catch(() => {}).then(work);
+    this.tokenQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+  refreshTokens(forceRefresh = false, expectedGeneration = this.generation) {
+    const targetGeneration = expectedGeneration;
+    if (this.closed || this.generation !== targetGeneration) {
+      return Promise.resolve({ rotated: false, generation: this.generation });
+    }
+    if (this.tokenRefreshing) {
+      if (
+        this.tokenRefreshingGeneration !== targetGeneration ||
+        (forceRefresh && !this.tokenRefreshingForce)
+      ) {
+        return this.tokenRefreshing
+          .finally(() => {})
+          .then(() => this.refreshTokens(forceRefresh, targetGeneration));
+      }
+      return this.tokenRefreshing;
+    }
+    this.tokenRefreshingForce = forceRefresh;
+    this.tokenRefreshingGeneration = targetGeneration;
+    let toRevoke;
+    const run = this.withTokenLock(async () => {
+      if (
+        this.closed ||
+        !this.record.tokens ||
+        this.attempt ||
+        this.generation !== targetGeneration
+      )
+        return { rotated: false, generation: this.generation };
+      const generation = this.generation,
+        old = this.record.tokens;
+      let next;
+      try {
+        const refreshMargin = Math.max(
+          60000,
+          Math.min(300000, Math.floor((this.tokenLifetimeMs ?? 0) * 0.2)),
+        );
+        const refresh =
+          forceRefresh ||
+          !this.claims ||
+          this.tokenUntil - this.now() < refreshMargin ||
+          this.mono() >= this.tokenMonoUntil - refreshMargin ||
+          this.state === 'unreachable' ||
+          this.state === 'reauth_required';
+        next = refresh
+          ? await this.platform.refresh(old.refresh_token, old.client_id)
+          : old;
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return { rotated: false, generation };
+        }
+        const verified = await this.validateTokens(next, this.claims);
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return { rotated: false, generation };
+        }
+        this.record.tokens = next;
+        await this.save();
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return { rotated: false, generation };
+        }
+        this.acceptVerified(verified);
+        if (
+          this.state !== 'authenticated' ||
+          JSON.stringify(verified.projection) !==
+            JSON.stringify(this.projection)
+        )
+          this.transition('authenticated', undefined, verified.projection);
+        const info = { rotated: refresh, generation };
+        this.emit('auth_refreshed', info);
+        return info;
+      } catch (error) {
+        if (generation !== this.generation || this.closed)
+          return { rotated: false, generation };
+        if ([400, 401, 403].includes(error.status)) {
+          this.generation++;
+          delete this.record.tokens;
+          this.record.manualLoginRequired = true;
+          delete this.record.proofFailureGeneration;
+          this.transition('revoked', reasonFor(error));
+          await this.save();
+          toRevoke = next ?? old;
+        } else this.transition('unreachable', 'offline');
+        return { rotated: false, generation };
+      }
+    }).finally(() => {
+      if (this.tokenRefreshing === run) {
+        this.tokenRefreshing = undefined;
+        this.tokenRefreshingForce = false;
+        this.tokenRefreshingGeneration = undefined;
+      }
+      if (toRevoke) this.track(this.queueRevoke(toRevoke));
+    });
+    this.tokenRefreshing = run;
+    return run;
+  }
+  async checkOnce(forceRefresh = false) {
     if (this.closed) return;
     if (this.localSource && this.localSource.until <= this.mono())
       await this.clearLocalUac(this.localSource.owner);
@@ -947,50 +1310,7 @@ export class Broker extends EventEmitter {
       await this.drainRevocations();
       return;
     }
-    const generation = this.generation,
-      old = this.record.tokens;
-    let next;
-    try {
-      const refresh =
-        !this.claims ||
-        this.tokenUntil - this.now() < 60000 ||
-        this.state === 'unreachable';
-      next = refresh
-        ? await this.platform.refresh(old.refresh_token, old.client_id)
-        : old;
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      const verified = await this.validateTokens(next, this.claims);
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      this.record.tokens = next;
-      await this.save();
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      this.acceptVerified(verified);
-      if (
-        this.state !== 'authenticated' ||
-        JSON.stringify(verified.projection) !== JSON.stringify(this.projection)
-      )
-        this.transition('authenticated', undefined, verified.projection);
-    } catch (error) {
-      if (generation !== this.generation || this.closed) return;
-      if ([400, 401, 403].includes(error.status)) {
-        this.generation++;
-        delete this.record.tokens;
-        this.record.manualLoginRequired = true;
-        delete this.record.proofFailureGeneration;
-        this.transition('revoked', reasonFor(error));
-        await this.save();
-        await this.queueRevoke(next ?? old);
-      } else this.transition('unreachable', 'offline');
-    }
+    await this.refreshTokens(forceRefresh);
     await this.drainRevocations();
   }
   async logout() {
@@ -1025,35 +1345,28 @@ export class Broker extends EventEmitter {
   async tokenFor(audience, context) {
     this.assert(context);
     if (audience === 'auriga') return this.record.tokens.access_token;
-    const acquire = this.health
-      .catch(() => {})
-      .then(async () => {
-        this.assert(context);
-        const result = await this.platform.audience(
-          this.record.tokens.refresh_token,
-          this.claims,
-          audience,
-          this.record.tokens.client_id,
-        );
-        if (context.generation !== this.generation || this.closed) {
-          await this.queueRevoke(result);
-          throw conflict();
-        }
-        if (typeof result.refresh_token !== 'string' || !result.refresh_token)
-          throw unavailable();
-        this.record.tokens = {
-          ...this.record.tokens,
-          refresh_token: result.refresh_token,
-        };
-        await this.save();
-        this.assert(context);
-        return result.access_token;
-      });
-    this.health = acquire.then(
-      () => {},
-      () => {},
-    );
-    return acquire;
+    return this.withTokenLock(async () => {
+      this.assert(context);
+      const result = await this.platform.audience(
+        this.record.tokens.refresh_token,
+        this.claims,
+        audience,
+        this.record.tokens.client_id,
+      );
+      if (context.generation !== this.generation || this.closed) {
+        this.track(this.queueRevoke(result));
+        throw conflict();
+      }
+      if (typeof result.refresh_token !== 'string' || !result.refresh_token)
+        throw unavailable();
+      this.record.tokens = {
+        ...this.record.tokens,
+        refresh_token: result.refresh_token,
+      };
+      await this.save();
+      this.assert(context);
+      return result.access_token;
+    });
   }
   async close() {
     this.closed = true;
@@ -1061,7 +1374,11 @@ export class Broker extends EventEmitter {
     this.generation++;
     this.attempt?.controller.abort();
     this.attempt = undefined;
-    await Promise.allSettled([...this.inflight, this.health]);
+    await Promise.allSettled([
+      ...this.inflight,
+      this.health,
+      this.tokenQueue ?? Promise.resolve(),
+    ]);
     await this.persistence;
     this.removeAllListeners();
   }

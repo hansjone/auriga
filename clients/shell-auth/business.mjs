@@ -79,7 +79,11 @@ export class BusinessProxy {
     this.changed = () => {
       for (const c of this.controllers) c.abort();
     };
-    broker.on('changed', this.changed);
+    this.invalidationEvent =
+      typeof broker.canSelfHeal === 'function'
+        ? 'identity_invalidated'
+        : 'changed';
+    broker.on(this.invalidationEvent, this.changed);
   }
   async call(message, owner) {
     requireValid('ShellAuthBusinessCall', message);
@@ -97,30 +101,45 @@ export class BusinessProxy {
         .update(JSON.stringify(message))
         .digest('hex'),
       previous = this.requests.get(message.requestId);
+    const isStreamOp =
+      operation === 'network_open' ||
+      operation === 'createAiChatCompletionStream' ||
+      Boolean(definition?.stream);
     if (previous) {
       if (previous.owner !== owner || previous.hash !== hash)
         return response({ error: error('common.conflict') });
       // Cached results are still identity-bound, including tickets and reads.
       try {
-        this.broker.assert(previous.context);
-        if (operation === 'network_open') {
-          this.host.resolve(owner, input.executionContextId, 'session');
+        if (previous.context) {
+          this.broker.assert(
+            previous.context,
+            !isStreamOp && typeof this.broker.canSelfHeal === 'function'
+              ? { allowRevisionAdvance: true }
+              : undefined,
+          );
+        }
+        if (isStreamOp) {
+          if (operation === 'network_open')
+            this.host.resolve(owner, input.executionContextId, 'session');
           const cached = await previous.result;
-          if (cached.output) {
+          if (cached.output?.body?.streamId) {
             this.streams.get(cached.output.body.streamId, owner);
-            return response({
-              output: {
-                ...cached.output,
-                body: {
-                  ...cached.output.body,
-                  registration: {
-                    ...cached.output.body.registration,
-                    created: false,
+            if (operation === 'network_open') {
+              return response({
+                output: {
+                  ...cached.output,
+                  body: {
+                    ...cached.output.body,
+                    registration: {
+                      ...cached.output.body.registration,
+                      created: false,
+                    },
                   },
                 },
-              },
-            });
+              });
+            }
           }
+          return cached;
         }
       } catch {
         return response({ error: error('common.unauthenticated') });
@@ -131,16 +150,63 @@ export class BusinessProxy {
       remaining = deadline - Date.now();
     if (remaining <= 0 || remaining > 30000 || this.requests.size >= 512)
       return response({ error: error('common.validation_failed') });
-    let context;
-    try {
-      context = this.broker.guard(message.shellEpoch, message.expectedRevision);
-    } catch (e) {
-      return response({ error: error(e.code ?? 'common.unauthenticated') });
-    }
-    const result = this.execute(definition, input, context, remaining, owner)
-      .then((output) => response({ output }))
-      .catch((e) =>
-        response({
+    const entry = {
+      hash,
+      owner,
+      context: undefined,
+      until: performance.now() + remaining,
+      result: undefined,
+    };
+    const run = async () => {
+      let context;
+      try {
+        context = this.broker.guard(
+          message.shellEpoch,
+          message.expectedRevision,
+        );
+      } catch (e) {
+        if (
+          e.code === 'common.unauthenticated' &&
+          message.shellEpoch === this.broker.epoch &&
+          this.broker.canSelfHeal?.()
+        ) {
+          try {
+            context = await this.broker.ensureAuthenticated({
+              timeoutMs: Math.min(remaining, 10000),
+              expectedRevision: message.expectedRevision,
+            });
+          } catch (healError) {
+            return response({
+              error: error(
+                healError.code ?? 'common.unauthenticated',
+                healError.code === 'common.unavailable',
+              ),
+            });
+          }
+        } else {
+          const code = e.code ?? 'common.unauthenticated';
+          return response({
+            error: error(code, code === 'common.conflict'),
+          });
+        }
+      }
+      const remainingAfterHeal = deadline - Date.now();
+      if (remainingAfterHeal <= 0) {
+        return response({ error: error('common.unavailable', true) });
+      }
+      entry.context = context;
+      try {
+        const output = await this.execute(
+          definition,
+          input,
+          context,
+          remainingAfterHeal,
+          owner,
+          deadline,
+        );
+        return response({ output });
+      } catch (e) {
+        return response({
           error:
             e.businessError ??
             error(
@@ -152,20 +218,31 @@ export class BusinessProxy {
               ].includes(e.code)
                 ? e.code
                 : 'common.unavailable',
-              !e.code,
+              !e.code || e.code === 'common.unavailable',
             ),
-        }),
-      );
-    this.requests.set(message.requestId, {
-      hash,
-      owner,
-      context,
-      until: performance.now() + remaining,
-      result,
-    });
-    return result;
+        });
+      }
+    };
+    entry.result = run();
+    this.requests.set(message.requestId, entry);
+    return entry.result;
   }
-  async execute(definition, input, context, remaining, owner) {
+  async execute(
+    definition,
+    input,
+    context,
+    remaining,
+    owner,
+    deadline = Date.now() + remaining,
+  ) {
+    const remainingMs = () => {
+      const left = deadline - Date.now();
+      if (left <= 0)
+        throw Object.assign(new Error('common.unavailable'), {
+          code: 'common.unavailable',
+        });
+      return left;
+    };
     if (
       [
         'network_open',
@@ -182,7 +259,7 @@ export class BusinessProxy {
         input,
         context,
         owner,
-        AbortSignal.timeout(remaining),
+        AbortSignal.timeout(remainingMs()),
       );
     if (definition.operation === 'upload_open')
       return this.streams.openUpload(input, context, owner);
@@ -246,20 +323,22 @@ export class BusinessProxy {
         });
       headers[key] = value;
     }
+    let activeContext = context;
     const isTeam =
       definition.route === '/ai/mcp' ||
       definition.route.startsWith('/ai/team/node/');
-    const token = isTeam
+    let token = isTeam
       ? undefined
       : await this.broker.tokenFor(
           definition.audience,
-          context,
+          activeContext,
           definition.operation,
         );
-    this.broker.assert(context);
+    this.broker.assert(activeContext, { allowRevisionAdvance: true });
+    const initialRemaining = remainingMs();
     const controller = new AbortController();
     this.controllers.add(controller);
-    const timeout = setTimeout(() => controller.abort(), remaining);
+    const timeout = setTimeout(() => controller.abort(), initialRemaining);
     timeout.unref();
     try {
       if (
@@ -269,7 +348,7 @@ export class BusinessProxy {
         return await this.team.execute(
           definition,
           input,
-          context,
+          activeContext,
           owner,
           controller.signal,
         );
@@ -292,11 +371,11 @@ export class BusinessProxy {
         input.body !== undefined ? JSON.stringify(input.body) : undefined;
       let contentType =
         input.body !== undefined ? 'application/json' : undefined;
-      if (
-        ['UnifiedUploadResourceVersion', 'uploadResourceVersion'].includes(
-          definition.operation,
-        )
-      ) {
+      const isMultipartUpload = [
+        'UnifiedUploadResourceVersion',
+        'uploadResourceVersion',
+      ].includes(definition.operation);
+      if (isMultipartUpload) {
         const form = new FormData();
         for (const [key, value] of Object.entries(input.body)) {
           if (key === 'metadata') {
@@ -307,7 +386,7 @@ export class BusinessProxy {
             continue;
           }
           for (const reference of Array.isArray(value) ? value : [value]) {
-            const upload = this.streams.consume(reference, context, owner);
+            const upload = this.streams.consume(reference, activeContext, owner);
             form.append(
               key,
               new Blob([upload.bytes], { type: upload.mediaType }),
@@ -318,18 +397,108 @@ export class BusinessProxy {
         requestBody = form;
         contentType = undefined;
       }
-      const response = await this.fetcher(url.href, {
-        method,
-        redirect: 'error',
-        credentials: 'omit',
-        signal: controller.signal,
-        headers: {
-          ...headers,
-          Authorization: `Bearer ${token}`,
-          ...(contentType ? { 'Content-Type': contentType } : {}),
-        },
-        ...(requestBody !== undefined ? { body: requestBody } : {}),
-      });
+      const sendFetch = (bearer) => {
+        remainingMs();
+        return this.fetcher(url.href, {
+          method,
+          redirect: 'error',
+          credentials: 'omit',
+          signal: controller.signal,
+          headers: {
+            ...headers,
+            Authorization: `Bearer ${bearer}`,
+            ...(contentType ? { 'Content-Type': contentType } : {}),
+          },
+          ...(requestBody !== undefined ? { body: requestBody } : {}),
+        });
+      };
+      let response = await sendFetch(token);
+      const canReplayOn401 =
+        !isMultipartUpload &&
+        (method === 'GET' ||
+          method === 'HEAD' ||
+          Boolean(headers['idempotency-key'] || headers['Idempotency-Key']));
+      if (
+        response.status === 401 &&
+        canReplayOn401 &&
+        this.broker.canSelfHeal?.()
+      ) {
+        await response.body?.cancel?.().catch(() => {});
+        const leftBeforeReplay = remainingMs();
+        const expectedIdentityKey = this.broker.identityKey?.({
+          identity: context.identity,
+        });
+        try {
+          activeContext = await this.broker.ensureAuthenticated({
+            forceRefresh: true,
+            timeoutMs: Math.min(leftBeforeReplay, 8000),
+            expectedGeneration: context.generation,
+            expectedIdentityKey,
+          });
+          this.broker.assert(activeContext, { allowRevisionAdvance: true });
+        } catch (healError) {
+          if (healError?.code === 'common.unavailable')
+            throw Object.assign(new Error('common.unavailable'), {
+              code: 'common.unavailable',
+            });
+          throw Object.assign(new Error('common.unauthenticated'), {
+            code: 'common.unauthenticated',
+          });
+        }
+        remainingMs();
+        try {
+          token = await this.broker.tokenFor(
+            definition.audience,
+            activeContext,
+            definition.operation,
+          );
+          this.broker.assert(activeContext, { allowRevisionAdvance: true });
+        } catch (tokenError) {
+          const authRejected =
+            [
+              'common.unauthenticated',
+              'common.forbidden',
+              'common.conflict',
+            ].includes(tokenError?.code) ||
+            [400, 401, 403].includes(tokenError?.status);
+          throw Object.assign(
+            new Error(
+              authRejected ? 'common.unauthenticated' : 'common.unavailable',
+            ),
+            {
+              code: authRejected
+                ? 'common.unauthenticated'
+                : 'common.unavailable',
+            },
+          );
+        }
+        remainingMs();
+        response = await sendFetch(token);
+      }
+      const resolveStreamContext = () => {
+        if (typeof this.broker.canSelfHeal !== 'function') {
+          this.broker.assert(activeContext);
+          return activeContext;
+        }
+        this.broker.assert(activeContext, { allowRevisionAdvance: true });
+        if (activeContext.revision === this.broker.revision) {
+          return activeContext;
+        }
+        const refreshed = this.broker.guard(
+          activeContext.epoch,
+          this.broker.revision,
+        );
+        if (
+          refreshed.generation !== activeContext.generation ||
+          this.broker.identityKey({ identity: refreshed.identity }) !==
+            this.broker.identityKey({ identity: activeContext.identity })
+        ) {
+          throw Object.assign(new Error('common.unauthenticated'), {
+            code: 'common.unauthenticated',
+          });
+        }
+        return refreshed;
+      };
       if (
         definition.operation === 'createAiChatCompletionStream' &&
         response.ok
@@ -341,9 +510,10 @@ export class BusinessProxy {
           !response.body
         )
           throw new Error('invalid SSE response');
+        const streamContext = resolveStreamContext();
         clearTimeout(timeout);
         const reader = response.body.getReader();
-        const stream = this.streams.create(context, owner, () => {
+        const stream = this.streams.create(streamContext, owner, () => {
           controller.abort();
           reader.cancel().catch(() => {});
         });
@@ -359,9 +529,10 @@ export class BusinessProxy {
       }
       if (definition.stream && response.ok) {
         if (!response.body) throw new Error('empty streaming response');
+        const streamContext = resolveStreamContext();
         clearTimeout(timeout);
         const reader = response.body.getReader();
-        const stream = this.streams.create(context, owner, () => {
+        const stream = this.streams.create(streamContext, owner, () => {
           controller.abort();
           reader.cancel().catch(() => {});
         });
@@ -374,7 +545,7 @@ export class BusinessProxy {
         'createMemberResourceDownloadTicket',
       ].includes(definition.operation);
       const raw = await boundedBody(response, ticketWire ? 65536 : undefined);
-      this.broker.assert(context);
+      this.broker.assert(activeContext, { allowRevisionAdvance: true });
       let body;
       try {
         body =
@@ -494,7 +665,7 @@ export class BusinessProxy {
     this.team.close();
     this.streams.close();
     this.changed();
-    this.broker.off('changed', this.changed);
+    this.broker.off(this.invalidationEvent, this.changed);
     this.requests.clear();
   }
   async pumpSse(stream, reader) {

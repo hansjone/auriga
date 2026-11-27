@@ -112,7 +112,13 @@ export async function startDesktopAuth({
       },
     );
     ipc = await startIpc({ helper, broker, business });
-    const timer = setInterval(() => broker.check().catch(() => {}), 10000);
+    let lastWall = Date.now();
+    const timer = setInterval(() => {
+      const nowWall = Date.now();
+      const wakeJump = Math.abs(nowWall - lastWall) > 30000;
+      lastWall = nowWall;
+      broker.check(wakeJump).catch(() => {});
+    }, 10000);
     timer.unref();
     return {
       broker,
