@@ -812,9 +812,12 @@ export class SkillPanel {
         this.sortMenuOpen = true;
         this.render();
         const closer = (event: Event) => {
-          const target = event.target as Node | null;
           const menu = this.root.querySelector('.market-sort');
-          if (menu && target && menu.contains(target)) return;
+          const path =
+            typeof event.composedPath === 'function'
+              ? event.composedPath()
+              : [];
+          if (menu && path.includes(menu)) return;
           this.closeSortMenu();
         };
         queueMicrotask(() => {

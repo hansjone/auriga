@@ -158,7 +158,9 @@ try {
   const root = panel.shadowRoot;
   const button = (label) => {
     const found = [...root.querySelectorAll('button')].find(
-      (element) => element.textContent === label,
+      (element) =>
+        element.textContent === label ||
+        element.getAttribute('aria-label') === label,
     );
     assert.ok(found, label);
     return found;

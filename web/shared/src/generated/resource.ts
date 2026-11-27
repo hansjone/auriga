@@ -6630,7 +6630,7 @@ export interface operations {
         page?: number;
         /** @description Case-insensitive substring match on name, description, author, department, or tags. Only with page. */
         search?: string;
-        /** @description Market sort. Empty or omitted keeps default catalog order. Only with page. */
+        /** @description Market sort. Omit the parameter to keep default catalog order. Only with page. */
         sort?: 'publishedAt' | 'installationCount' | 'starCount' | 'name';
       };
       header?: never;
