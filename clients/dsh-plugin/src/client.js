@@ -2603,7 +2603,16 @@ window.__ModuleLoader__.load({
               'aria-label': t('panel'),
             },
             !embedded && h('h2', null, t('panel')),
-            phase.status !== 'ready' && notice(phase, retry, true),
+            // Keep a stable sibling slot so loading notice mount/unmount does
+            // not remount the settings view (and drop in-flight state reads).
+            h(
+              'div',
+              {
+                className: 'auriga-settings-phase',
+                hidden: phase.status === 'ready' || undefined,
+              },
+              phase.status !== 'ready' ? notice(phase, retry, true) : null,
+            ),
             View
               ? h(View, {
                   locale: host.locale,
@@ -3717,7 +3726,7 @@ window.__ModuleLoader__.load({
                             t(challenge ? 'uacRetry' : 'uacStart'),
                           ),
                     ),
-                    challenge &&
+                    challenge?.correlationId &&
                       h(
                         'small',
                         { className: 'auriga-ref' },
@@ -3830,9 +3839,12 @@ window.__ModuleLoader__.load({
           React.useEffect(() => {
             if (!local || (shell === undefined && uac === undefined)) return;
             if (uac === undefined && !manualPlatform.current) return;
+            // shell must be loaded before readiness: !shell?.configured is true
+            // when shell is still undefined and would freeze status polling.
+            if (shell === undefined) return;
             // Retry startup readiness slowly until the IPC broker appears (when no local UAC).
             setSettled(
-              hasLocalUac || !shell?.configured || !!shell?.brokerAvailable,
+              hasLocalUac || !shell.configured || !!shell.brokerAvailable,
             );
             const needsPlatform = platformAvailable && !shell?.loggedIn;
             if (
