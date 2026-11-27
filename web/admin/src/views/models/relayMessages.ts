@@ -37,6 +37,8 @@ const zh = {
   importInvalidLimits:
     '能力须为非负安全整数；上下文为0或至少2，0表示未知；同时已知时输出须小于上下文',
   importWriteUnknown: '未确认保存结果；重试将先读回核对，不会覆盖已有模型',
+  importInvalidEffectiveAt:
+    '计价生效时间不被服务器接受，常见原因是浏览器与服务器时钟偏差；请重试或校准时钟后保存',
   importPreviewChanged: '有效能力已变化，请重新核对预览并确认后导入。',
   importStatus_pending: '待导入',
   importStatus_saving: '保存中',
@@ -274,6 +276,8 @@ const en: Record<keyof typeof zh, string> = {
     'Use nonnegative safe integers; context must be zero or at least two. Zero means unknown. When both are known, output must be below context.',
   importWriteUnknown:
     'Save result is unconfirmed. Retry checks persisted configuration before writing.',
+  importInvalidEffectiveAt:
+    'Price effectiveAt was rejected. Browser/server clock skew is a common cause; retry or sync clocks, then save again.',
   importPreviewChanged:
     'Effective capabilities changed. Review the preview and confirm before importing.',
   importStatus_pending: 'Pending',

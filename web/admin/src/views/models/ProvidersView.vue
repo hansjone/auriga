@@ -225,7 +225,8 @@ const freshPool = (): RelayPool => ({
     inputMicrosPerMillionTokens: 0,
     outputMicrosPerMillionTokens: 0,
     version: browserUuid(),
-    effectiveAt: new Date().toISOString(),
+    // Leave headroom for browser/server clock skew on first save.
+    effectiveAt: new Date(Date.now() - 60_000).toISOString(),
   },
 });
 async function load() {
@@ -415,6 +416,11 @@ function askPool() {
   ) {
     error.value = t('invalid');
     return;
+  }
+  if (!selected.value) {
+    // Mint a slightly past effectiveAt at submit time so browser/server skew
+    // does not reject a brand-new public model.
+    body.price.effectiveAt = new Date(Date.now() - 60_000).toISOString();
   }
   pending.value = writeIntent.createAction(
     'ai.providers.write',
