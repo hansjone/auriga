@@ -1603,7 +1603,7 @@ export interface components {
     UnifiedPackagePage: {
       items: components['schemas']['UnifiedPackage'][];
       nextCursor?: string;
-      /** Total matching packages when page mode is used. */
+      /** @description Total matching packages when page mode is used. */
       total?: number;
     };
     UnifiedVersionPage: {
