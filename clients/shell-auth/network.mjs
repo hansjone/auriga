@@ -68,12 +68,18 @@ const wire = (value, parse, limit = 65536) => {
   return { bytes, value: parse(bytes) };
 };
 export class NetworkProxy {
-  /** @param {any} broker @param {any} host @param {any} streams @param {{directory?:string,config?:any,core?:any,fetcher?:typeof globalThis.fetch}} options */
+  /** @param {any} broker @param {any} host @param {any} streams @param {{directory?:string,config?:any,core?:any,fetcher?:typeof globalThis.fetch,resolveWsAgent?:(url:string,tlsOpts?:any)=>any}} options */
   constructor(
     broker,
     host,
     streams,
-    { directory, config, core, fetcher = globalThis.fetch } = {},
+    {
+      directory,
+      config,
+      core,
+      fetcher = globalThis.fetch,
+      resolveWsAgent,
+    } = {},
   ) {
     this.broker = broker;
     this.host = host;
@@ -82,6 +88,7 @@ export class NetworkProxy {
     this.config = config;
     this.core = core;
     this.fetcher = fetcher;
+    this.resolveWsAgent = resolveWsAgent;
     this.links = new Map();
     this.trustStores = new Map();
     this.changed = () => {
@@ -418,6 +425,13 @@ export class NetworkProxy {
         url: prepared.url,
         ...ticket.subjects,
         auth: ticket.auth,
+        ...(this.resolveWsAgent && record.core.createWsSocketFactory
+          ? {
+              createSocket: record.core.createWsSocketFactory({
+                resolveAgent: this.resolveWsAgent,
+              }),
+            }
+          : {}),
         onMessage: (bytes) => {
           if (record.closed) return;
           if (

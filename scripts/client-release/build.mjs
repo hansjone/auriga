@@ -5,6 +5,7 @@ import {
   cpSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   realpathSync,
   mkdirSync,
   readFileSync,
@@ -29,6 +30,7 @@ import {
 } from '../../clients/installer/runtime/release.mjs';
 import { sign, generateKeyPairSync } from 'node:crypto';
 import { parse as parseVersion } from '../../clients/installer/runtime/semver-lite.mjs';
+import { validateProxyConfig } from '../../clients/installer/runtime/network-proxy.mjs';
 import {
   validateResourceRoots,
   validateUacConfigDir,
@@ -192,6 +194,16 @@ export function validateBuildOptions(o) {
     physical(o['uac-config-dir']);
     validateUacConfigDir(o['uac-config-dir']);
   }
+  if (o['default-proxy-file']) {
+    physical(o['default-proxy-file']);
+    const st = lstatSync(o['default-proxy-file']);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > 65536) {
+      throw new Error('invalid --default-proxy-file');
+    }
+    validateProxyConfig(
+      JSON.parse(readFileSync(o['default-proxy-file'], 'utf8')),
+    );
+  }
   return unsigned;
 }
 export function resolveBuildPaths(options) {
@@ -205,6 +217,7 @@ export function resolveBuildPaths(options) {
     'release-public-key',
     'resource-trust-json',
     'uac-config-dir',
+    'default-proxy-file',
     'verify-key',
   ])
     if (options[key]) options[key] = resolve(options[key]);
@@ -504,6 +517,9 @@ export async function buildWorker(optionsFile, hooks = {}) {
     'release-public-key': o['release-public-key'],
     'resource-trust-json': o['resource-trust-json'],
     ...(o['uac-config-dir'] ? { 'uac-config-dir': o['uac-config-dir'] } : {}),
+    ...(o['default-proxy-file']
+      ? { 'default-proxy-file': o['default-proxy-file'] }
+      : {}),
     ...(o['platform-origin']
       ? {
           'platform-origin': o['platform-origin'],

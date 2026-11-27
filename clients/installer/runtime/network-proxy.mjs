@@ -1,0 +1,1467 @@
+/**
+ * Auriga Desktop shell-owned network proxy controller, routing engine,
+ * loopback routing proxy server, and controlled HTTP(S)/WS transport.
+ *
+ * Design invariants:
+ * - Default mode is `direct` (ignores OS / inherited environment proxies).
+ * - Loopback targets (localhost, 127.0.0.1, ::1, 127.0.0.0/8) are ALWAYS direct.
+ * - Layered config resolution:
+ *     1) User override: <dataHome>/auriga/network-proxy.json (mode 0600)
+ *     2) Bundled site defaults: <versionDir>/auriga/defaults.json -> networkProxy
+ *     3) Builtin fallback: direct (no proxy)
+ * - Zero external dependencies (Node built-ins only).
+ */
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
+import net, { BlockList, isIP } from 'node:net';
+import tls from 'node:tls';
+import { Readable } from 'node:stream';
+
+export const PROXY_SCHEMA_VERSION = 1;
+export const MAX_PROXY_RULES = 200;
+export const MAX_NO_PROXY_ENTRIES = 200;
+export const BUILTIN_LOOPBACK_NO_PROXY = Object.freeze([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+]);
+
+export const BUILTIN_DEFAULT_PROXY_CONFIG = Object.freeze({
+  schemaVersion: PROXY_SCHEMA_VERSION,
+  mode: 'direct',
+  globalProxy: '',
+  noProxy: Object.freeze([]),
+  rules: Object.freeze([]),
+});
+
+const STRIPPED_PROXY_ENV_KEYS = new Set([
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
+  'npm_config_proxy',
+  'npm_config_https_proxy',
+  'npm_config_http_proxy',
+  'node_use_env_proxy',
+]);
+
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+const CREDENTIAL_PLACEHOLDER = '__AURIGA_KEEP_PASSWORD__';
+
+function proxyError(code, message) {
+  return Object.assign(new Error(message ?? code), { code });
+}
+
+/**
+ * Strip all inherited host/system proxy variables from an environment object.
+ * @param {Record<string, string | undefined>} base
+ * @returns {Record<string, string | undefined>}
+ */
+export function stripSystemProxyEnv(base = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (STRIPPED_PROXY_ENV_KEYS.has(k.toLowerCase())) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Normalize and validate an HTTP/HTTPS proxy URL.
+ * Empty string is allowed when `optional` is true.
+ * @param {unknown} input
+ * @param {{ optional?: boolean }} [options]
+ * @returns {string}
+ */
+export function normalizeProxyUrl(input, { optional = false } = {}) {
+  if (input === undefined || input === null || input === '') {
+    if (optional) return '';
+    throw proxyError('invalidProxyUrl', '代理地址不能为空');
+  }
+  if (typeof input !== 'string' || input.length > 2048) {
+    throw proxyError('invalidProxyUrl', '代理地址格式无效');
+  }
+  const trimmed = input.trim();
+  if (!trimmed) {
+    if (optional) return '';
+    throw proxyError('invalidProxyUrl', '代理地址不能为空');
+  }
+  if (/[\r\n\0\s]/.test(trimmed)) {
+    throw proxyError('invalidProxyUrl', '代理地址不能包含空白或控制字符');
+  }
+  let url;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw proxyError('invalidProxyUrl', '代理地址格式无效');
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw proxyError('invalidProxyUrl', '仅支持 http:// 或 https:// 代理');
+  }
+  if (
+    !url.hostname ||
+    url.search ||
+    url.hash ||
+    (url.pathname && url.pathname !== '/')
+  ) {
+    throw proxyError('invalidProxyUrl', '代理地址不能包含路径、查询参数或片段');
+  }
+  const port = url.port
+    ? Number(url.port)
+    : url.protocol === 'https:'
+      ? 443
+      : 80;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw proxyError('invalidProxyUrl', '代理端口无效');
+  }
+  const auth =
+    url.username || url.password
+      ? `${url.username}${url.password ? ':' + url.password : ''}@`
+      : '';
+  const explicitPort = url.port ? `:${url.port}` : '';
+  return `${url.protocol}//${auth}${url.hostname}${explicitPort}`;
+}
+
+/**
+ * Mask password in a proxy URL for UI / logs / diagnostics.
+ * @param {string} raw
+ * @returns {{ display: string, hasPassword: boolean }}
+ */
+export function maskProxyUrl(raw) {
+  if (!raw) return { display: '', hasPassword: false };
+  try {
+    const url = new URL(raw);
+    const hasPassword = Boolean(url.password);
+    if (!url.username && !url.password) {
+      return {
+        display: `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}`,
+        hasPassword: false,
+      };
+    }
+    const auth = hasPassword ? `${url.username}:***` : url.username;
+    return {
+      display: `${url.protocol}//${auth}@${url.hostname}${url.port ? ':' + url.port : ''}`,
+      hasPassword,
+    };
+  } catch {
+    return { display: '', hasPassword: false };
+  }
+}
+
+/**
+ * Validate a domain / wildcard suffix / IP / CIDR match pattern.
+ * @param {unknown} input
+ * @returns {string}
+ */
+export function normalizeMatchPattern(input) {
+  if (typeof input !== 'string') {
+    throw proxyError('invalidPattern', '匹配规则必须是字符串');
+  }
+  const raw = input.trim().toLowerCase();
+  if (
+    !raw ||
+    raw.length > 255 ||
+    /[\s/\\:?#@"'\r\n\0]/.test(raw.replace(/\/\d+$/, ''))
+  ) {
+    throw proxyError('invalidPattern', `无效的域名或网段规则: ${input}`);
+  }
+  if (raw.includes('://')) {
+    throw proxyError(
+      'invalidPattern',
+      '规则请填写域名、IP 或 CIDR，不要包含协议头',
+    );
+  }
+  // CIDR check
+  if (raw.includes('/')) {
+    const [ipPart, prefixPart, extra] = raw.split('/');
+    if (extra !== undefined || !/^\d{1,3}$/.test(prefixPart)) {
+      throw proxyError('invalidPattern', `无效的 CIDR 规则: ${input}`);
+    }
+    const bareIp = ipPart.replace(/^\[|\]$/g, '');
+    const family = isIP(bareIp);
+    const prefix = Number(prefixPart);
+    if (
+      (family === 4 && prefix >= 0 && prefix <= 32) ||
+      (family === 6 && prefix >= 0 && prefix <= 128)
+    ) {
+      return `${bareIp}/${prefix}`;
+    }
+    throw proxyError('invalidPattern', `无效的 CIDR 规则: ${input}`);
+  }
+  // Bare IP (IPv4 or bracketed/unbracketed IPv6)
+  const bareIp = raw.replace(/^\[|\]$/g, '');
+  if (isIP(bareIp)) return bareIp;
+
+  // Wildcard suffix: *.example.com or .example.com
+  if (raw.startsWith('*.') || raw.startsWith('.')) {
+    const suffix = raw.startsWith('*.') ? raw.slice(2) : raw.slice(1);
+    if (!suffix || suffix.includes('*') || !isValidHostname(suffix)) {
+      throw proxyError('invalidPattern', `无效的通配域名规则: ${input}`);
+    }
+    return `*.${suffix}`;
+  }
+
+  // Exact hostname
+  if (raw.includes('*') || !isValidHostname(raw)) {
+    throw proxyError('invalidPattern', `无效的域名规则: ${input}`);
+  }
+  return raw;
+}
+
+function isValidHostname(host) {
+  if (
+    !host ||
+    host.length > 253 ||
+    host.startsWith('.') ||
+    host.endsWith('.')
+  ) {
+    return false;
+  }
+  const labels = host.split('.');
+  return labels.every(
+    (label) =>
+      label.length >= 1 &&
+      label.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+  );
+}
+
+/**
+ * Restore masked password placeholder from previous config when editing in UI.
+ * @param {string} incoming
+ * @param {string} previous
+ */
+function preserveMaskedPassword(incoming, previous) {
+  if (!incoming || !previous) return incoming;
+  try {
+    const nextUrl = new URL(incoming);
+    const prevUrl = new URL(previous);
+    const maskedToken = decodeURIComponent(nextUrl.password);
+    if (
+      (maskedToken === '***' || maskedToken === CREDENTIAL_PLACEHOLDER) &&
+      nextUrl.protocol === prevUrl.protocol &&
+      nextUrl.hostname === prevUrl.hostname &&
+      nextUrl.port === prevUrl.port &&
+      nextUrl.username === prevUrl.username &&
+      prevUrl.password
+    ) {
+      nextUrl.password = prevUrl.password;
+      return normalizeProxyUrl(nextUrl.href);
+    }
+  } catch {
+    // Let normalizeProxyUrl handle invalid inputs.
+  }
+  return incoming;
+}
+
+/**
+ * Validate and normalize a full proxy config object.
+ * @param {unknown} input
+ * @param {ReturnType<typeof validateProxyConfig> | null} [previous]
+ */
+export function validateProxyConfig(input, previous = null) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw proxyError('invalidSettings', '代理配置格式无效');
+  }
+  const obj = /** @type {Record<string, unknown>} */ (input);
+  const schemaVersion = obj.schemaVersion ?? PROXY_SCHEMA_VERSION;
+  if (schemaVersion !== PROXY_SCHEMA_VERSION) {
+    throw proxyError('invalidSettings', '不支持的代理配置版本');
+  }
+  if (obj.mode !== 'direct' && obj.mode !== 'proxy') {
+    throw proxyError('invalidSettings', '代理模式必须为 direct 或 proxy');
+  }
+
+  const rawGlobal =
+    typeof obj.globalProxy === 'string' && previous?.globalProxy
+      ? preserveMaskedPassword(obj.globalProxy, previous.globalProxy)
+      : obj.globalProxy;
+  const globalProxy = normalizeProxyUrl(rawGlobal ?? '', { optional: true });
+
+  const rawNoProxy = obj.noProxy ?? [];
+  if (!Array.isArray(rawNoProxy) || rawNoProxy.length > MAX_NO_PROXY_ENTRIES) {
+    throw proxyError('invalidSettings', '直连例外列表无效或超过上限');
+  }
+  const noProxySet = new Set();
+  for (const item of rawNoProxy) {
+    if (typeof item === 'string' && !item.trim()) continue;
+    noProxySet.add(normalizeMatchPattern(item));
+  }
+
+  const rawRules = obj.rules ?? [];
+  if (!Array.isArray(rawRules) || rawRules.length > MAX_PROXY_RULES) {
+    throw proxyError('invalidSettings', '域名规则列表无效或超过上限');
+  }
+  const prevById = new Map((previous?.rules ?? []).map((r) => [r.id, r]));
+  const seenIds = new Set();
+  const rules = [];
+  for (let i = 0; i < rawRules.length; i += 1) {
+    const item = rawRules[i];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw proxyError('invalidSettings', '域名规则项格式无效');
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim()
+        ? item.id.trim().slice(0, 64)
+        : `rule-${i + 1}`;
+    if (seenIds.has(id)) {
+      throw proxyError('invalidSettings', `重复的规则 ID: ${id}`);
+    }
+    seenIds.add(id);
+    const enabled = item.enabled !== false;
+    const pattern = normalizeMatchPattern(item.pattern);
+    if (item.action !== 'proxy' && item.action !== 'direct') {
+      throw proxyError('invalidSettings', '规则动作必须为 proxy 或 direct');
+    }
+    let proxy = '';
+    if (item.action === 'proxy') {
+      const prevRule = prevById.get(id);
+      const candidate =
+        typeof item.proxy === 'string' && prevRule?.proxy
+          ? preserveMaskedPassword(item.proxy, prevRule.proxy)
+          : item.proxy;
+      proxy = normalizeProxyUrl(candidate, { optional: false });
+    }
+    rules.push({ id, enabled, pattern, action: item.action, proxy });
+  }
+
+  return {
+    schemaVersion: PROXY_SCHEMA_VERSION,
+    mode: obj.mode,
+    globalProxy,
+    noProxy: [...noProxySet],
+    rules,
+  };
+}
+
+/**
+ * Redact passwords before returning config to settings UI or diagnostics.
+ * @param {ReturnType<typeof validateProxyConfig>} config
+ */
+export function redactProxyConfig(config) {
+  const globalMasked = maskProxyUrl(config.globalProxy);
+  return {
+    schemaVersion: config.schemaVersion,
+    mode: config.mode,
+    globalProxy: globalMasked.display,
+    globalProxyHasPassword: globalMasked.hasPassword,
+    noProxy: [...config.noProxy],
+    rules: config.rules.map((rule) => {
+      const masked = maskProxyUrl(rule.proxy);
+      return {
+        id: rule.id,
+        enabled: rule.enabled,
+        pattern: rule.pattern,
+        action: rule.action,
+        proxy: masked.display,
+        hasPassword: masked.hasPassword,
+      };
+    }),
+  };
+}
+
+// ------------------------------------------------------------ routing engine
+
+/**
+ * Built-in loopback protection: never proxy local endpoints.
+ * @param {string} hostname
+ */
+export function isLoopbackHost(hostname) {
+  const host = String(hostname ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') {
+    return true;
+  }
+  const family = isIP(host);
+  if (family === 4) {
+    return host.startsWith('127.');
+  }
+  if (family === 6) {
+    return (
+      host === '::1' ||
+      host === '0:0:0:0:0:0:0:1' ||
+      host.startsWith('::ffff:127.')
+    );
+  }
+  return false;
+}
+
+/**
+ * Check if a target hostname matches a normalized pattern.
+ * @param {string} targetHost
+ * @param {string} pattern
+ */
+export function matchesPattern(targetHost, pattern) {
+  const host = String(targetHost ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  if (!host || !pattern) return false;
+
+  if (pattern.includes('/')) {
+    const [ipPart, prefixStr] = pattern.split('/');
+    const ipFamily = isIP(ipPart);
+    const hostFamily = isIP(host);
+    if (!ipFamily || ipFamily !== hostFamily) return false;
+    const list = new BlockList();
+    list.addSubnet(ipPart, Number(prefixStr), ipFamily === 4 ? 'ipv4' : 'ipv6');
+    return list.check(host, hostFamily === 4 ? 'ipv4' : 'ipv6');
+  }
+
+  const patIpFamily = isIP(pattern);
+  if (patIpFamily) {
+    return host === pattern;
+  }
+
+  if (pattern.startsWith('*.')) {
+    const suffix = pattern.slice(1); // '.example.com'
+    return host.endsWith(suffix) && host.length > suffix.length;
+  }
+
+  return host === pattern;
+}
+
+/**
+ * Deterministic proxy resolution:
+ *  1) Built-in loopback -> direct (cannot be overridden)
+ *  2) mode === 'direct' -> direct
+ *  3) rules (ordered, enabled only, first match wins)
+ *  4) noProxy -> direct
+ *  5) globalProxy -> proxy (if set) else direct
+ *
+ * @param {string} targetHost
+ * @param {number | undefined} _targetPort
+ * @param {ReturnType<typeof validateProxyConfig>} config
+ * @param {{ selfPort?: number }} [options]
+ * @returns {{ action: 'direct' | 'proxy', proxy: string, matchedBy: string, ruleId?: string }}
+ */
+export function resolveProxy(
+  targetHost,
+  _targetPort,
+  config,
+  { selfPort } = {},
+) {
+  const host = String(targetHost ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+
+  if (isLoopbackHost(host)) {
+    return { action: 'direct', proxy: '', matchedBy: 'builtin_loopback' };
+  }
+  if (!config || config.mode !== 'proxy') {
+    return { action: 'direct', proxy: '', matchedBy: 'mode_direct' };
+  }
+
+  const checkLoop = (proxyStr) => {
+    if (!selfPort || !proxyStr) return;
+    try {
+      const u = new URL(proxyStr);
+      const p = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+      if (isLoopbackHost(u.hostname) && p === selfPort) {
+        throw proxyError('proxy_loop', '代理地址不能指向客户端本地分流端口');
+      }
+    } catch (err) {
+      if (err?.code === 'proxy_loop') throw err;
+    }
+  };
+
+  for (const rule of config.rules ?? []) {
+    if (!rule.enabled) continue;
+    if (matchesPattern(host, rule.pattern)) {
+      if (rule.action === 'direct') {
+        return {
+          action: 'direct',
+          proxy: '',
+          matchedBy: `rule:${rule.pattern}`,
+          ruleId: rule.id,
+        };
+      }
+      checkLoop(rule.proxy);
+      return {
+        action: 'proxy',
+        proxy: rule.proxy,
+        matchedBy: `rule:${rule.pattern}`,
+        ruleId: rule.id,
+      };
+    }
+  }
+
+  for (const entry of config.noProxy ?? []) {
+    if (matchesPattern(host, entry)) {
+      return {
+        action: 'direct',
+        proxy: '',
+        matchedBy: `noProxy:${entry}`,
+      };
+    }
+  }
+
+  if (config.globalProxy) {
+    checkLoop(config.globalProxy);
+    return {
+      action: 'proxy',
+      proxy: config.globalProxy,
+      matchedBy: 'globalProxy',
+    };
+  }
+
+  return { action: 'direct', proxy: '', matchedBy: 'default_direct' };
+}
+
+// ------------------------------------------------------------ layered store
+
+export function userProxyConfigPath(dataHome) {
+  return join(dataHome, 'auriga', 'network-proxy.json');
+}
+
+export function bundledDefaultsPath(versionDir) {
+  return versionDir ? join(versionDir, 'auriga', 'defaults.json') : null;
+}
+
+function fileStamp(path) {
+  if (!path) return 'none';
+  try {
+    const st = statSync(path);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return 'missing';
+  }
+}
+
+function readBundledProxyDefault(defaultsFile) {
+  if (!defaultsFile || !existsSync(defaultsFile)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(defaultsFile, 'utf8'));
+    if (!parsed?.networkProxy) return null;
+    return validateProxyConfig(parsed.networkProxy);
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonAtomic(file, data) {
+  mkdirSync(dirname(file), { recursive: true });
+  const temp = `${file}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(data, null, 2) + '\n', {
+      mode: 0o600,
+      flag: 'wx',
+    });
+    renameSync(temp, file);
+  } finally {
+    rmSync(temp, { force: true });
+  }
+}
+
+/**
+ * Create a layered, hot-reloading proxy configuration controller.
+ * Resolution order: user override > bundled defaults.json > builtin direct.
+ *
+ * @param {{ dataHome: string, defaultsFile?: string | null, onChange?: (snapshot: any) => void }} options
+ */
+export function createProxyConfigStore({
+  dataHome,
+  defaultsFile = null,
+  onChange,
+} = {}) {
+  const userFile = userProxyConfigPath(dataHome);
+  let cache = null;
+
+  function loadFresh() {
+    const userStamp = fileStamp(userFile);
+    const defStamp = fileStamp(defaultsFile);
+    if (cache && cache.userStamp === userStamp && cache.defStamp === defStamp) {
+      return cache.value;
+    }
+
+    const bundled = readBundledProxyDefault(defaultsFile);
+    const fallbackConfig = bundled ?? {
+      schemaVersion: PROXY_SCHEMA_VERSION,
+      mode: 'direct',
+      globalProxy: '',
+      noProxy: [],
+      rules: [],
+    };
+    const fallbackSource = bundled ? 'bundled' : 'builtin';
+
+    let config = fallbackConfig;
+    let source = fallbackSource;
+    let degraded = false;
+
+    if (userStamp !== 'missing') {
+      try {
+        config = validateProxyConfig(
+          JSON.parse(readFileSync(userFile, 'utf8')),
+        );
+        source = 'user';
+      } catch {
+        // Corrupt user override safely falls back without blocking launch or reverting to OS proxy.
+        config = fallbackConfig;
+        source = fallbackSource;
+        degraded = true;
+      }
+    }
+
+    const value = {
+      config,
+      source,
+      hasBundledDefault: Boolean(bundled),
+      degraded,
+    };
+    cache = { userStamp, defStamp, value };
+    return value;
+  }
+
+  return {
+    userFile,
+    defaultsFile,
+    get() {
+      return loadFresh();
+    },
+    snapshot() {
+      const current = loadFresh();
+      return {
+        ...redactProxyConfig(current.config),
+        source: current.source,
+        hasBundledDefault: current.hasBundledDefault,
+        degraded: current.degraded,
+        builtinNoProxy: [...BUILTIN_LOOPBACK_NO_PROXY],
+      };
+    },
+    save(input) {
+      const previous = loadFresh().config;
+      const validated = validateProxyConfig(input, previous);
+      writeJsonAtomic(userFile, validated);
+      cache = null;
+      const next = loadFresh();
+      onChange?.(next);
+      return this.snapshot();
+    },
+    reset() {
+      rmSync(userFile, { force: true });
+      cache = null;
+      const next = loadFresh();
+      onChange?.(next);
+      return this.snapshot();
+    },
+  };
+}
+
+// ------------------------------------------------------------ upstream tunnel
+
+function buildProxyAuthHeader(proxyUrl) {
+  if (!proxyUrl.username && !proxyUrl.password) return undefined;
+  const user = decodeURIComponent(proxyUrl.username);
+  const pass = decodeURIComponent(proxyUrl.password);
+  return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+}
+
+/**
+ * Establish a raw TCP tunnel to `targetHost:targetPort` through an upstream HTTP or HTTPS proxy
+ * using the HTTP CONNECT method.
+ *
+ * @param {string} proxyUrlStr
+ * @param {string} targetHost
+ * @param {number} targetPort
+ * @param {{ timeoutMs?: number, signal?: AbortSignal }} [options]
+ * @returns {Promise<{ socket: net.Socket, buffered: Buffer }>}
+ */
+export function connectViaHttpProxy(
+  proxyUrlStr,
+  targetHost,
+  targetPort,
+  { timeoutMs = 15_000, signal } = {},
+) {
+  const proxyUrl = new URL(proxyUrlStr);
+  const proxyPort = proxyUrl.port
+    ? Number(proxyUrl.port)
+    : proxyUrl.protocol === 'https:'
+      ? 443
+      : 80;
+  const hostHeader =
+    isIP(targetHost) === 6
+      ? `[${targetHost}]:${targetPort}`
+      : `${targetHost}:${targetPort}`;
+  const authHeader = buildProxyAuthHeader(proxyUrl);
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(proxyError('aborted', '连接已取消'));
+      return;
+    }
+
+    let settled = false;
+    let headerBuf = Buffer.alloc(0);
+
+    const socket =
+      proxyUrl.protocol === 'https:'
+        ? tls.connect({
+            host: proxyUrl.hostname,
+            port: proxyPort,
+            servername: isIP(proxyUrl.hostname) ? undefined : proxyUrl.hostname,
+          })
+        : net.connect({ host: proxyUrl.hostname, port: proxyPort });
+
+    const cleanupListeners = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      socket.removeListener('data', onData);
+      socket.removeListener('error', onError);
+      socket.removeListener('close', onClose);
+    };
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanupListeners();
+      socket.destroy();
+      reject(err);
+    };
+
+    const onAbort = () => fail(proxyError('aborted', '连接已取消'));
+    const onError = (err) =>
+      fail(
+        Object.assign(proxyError('proxy_unreachable', err.message), {
+          cause: err,
+        }),
+      );
+    const onClose = () =>
+      fail(proxyError('proxy_unreachable', '代理连接提前关闭'));
+
+    const timer = setTimeout(() => {
+      fail(proxyError('timeout', '代理连接超时'));
+    }, timeoutMs);
+    timer.unref?.();
+
+    const onData = (chunk) => {
+      headerBuf = Buffer.concat([headerBuf, chunk]);
+      if (headerBuf.length > 32 * 1024) {
+        fail(proxyError('proxy_error', '代理响应头过大'));
+        return;
+      }
+      const sep = headerBuf.indexOf('\r\n\r\n');
+      if (sep === -1) return;
+      const headText = headerBuf.subarray(0, sep).toString('latin1');
+      const rest = headerBuf.subarray(sep + 4);
+      const statusLine = headText.split('\r\n', 1)[0] ?? '';
+      const match = statusLine.match(/^HTTP\/\d\.\d\s+(\d{3})/i);
+      const statusCode = match ? Number(match[1]) : 0;
+
+      if (statusCode === 200) {
+        settled = true;
+        cleanupListeners();
+        resolve({ socket, buffered: rest });
+        return;
+      }
+      if (statusCode === 407) {
+        fail(
+          Object.assign(proxyError('proxy_auth_required', '代理需要身份验证'), {
+            statusCode: 407,
+          }),
+        );
+        return;
+      }
+      fail(
+        Object.assign(
+          proxyError(
+            'proxy_error',
+            `代理拒绝连接 (HTTP ${statusCode || 'unknown'})`,
+          ),
+          { statusCode },
+        ),
+      );
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    socket.on('error', onError);
+    socket.on('close', onClose);
+    socket.on('data', onData);
+
+    const onConnected = () => {
+      const lines = [
+        `CONNECT ${hostHeader} HTTP/1.1`,
+        `Host: ${hostHeader}`,
+        'Proxy-Connection: Keep-Alive',
+      ];
+      if (authHeader) lines.push(`Proxy-Authorization: ${authHeader}`);
+      lines.push('', '');
+      socket.write(lines.join('\r\n'));
+    };
+
+    if (proxyUrl.protocol === 'https:') {
+      socket.once('secureConnect', onConnected);
+    } else {
+      socket.once('connect', onConnected);
+    }
+  });
+}
+
+// ------------------------------------------------------------ loopback router
+
+function stripHopByHop(headers) {
+  const out = {};
+  const connectionTokens = new Set(
+    String(headers.connection ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  for (const [k, v] of Object.entries(headers)) {
+    const lower = k.toLowerCase();
+    if (HOP_BY_HOP_HEADERS.has(lower) || connectionTokens.has(lower)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Start the local loopback routing proxy on 127.0.0.1:<random free port>.
+ * All DSH & child processes point HTTP_PROXY/HTTPS_PROXY here so:
+ * - System/OS proxy is completely bypassed.
+ * - Per-domain routing works transparently for Python, pip, curl, git, Node, etc.
+ * - Config updates apply live without restarting DSH.
+ * - Upstream proxy credentials never enter child process environments.
+ *
+ * @param {{ getConfig: () => ReturnType<typeof validateProxyConfig>, connectTimeoutMs?: number, idleTimeoutMs?: number }} options
+ */
+export async function startLocalProxyServer({
+  getConfig,
+  connectTimeoutMs = 15_000,
+  idleTimeoutMs = 120_000,
+}) {
+  let selfPort = 0;
+  const activeSockets = new Set();
+
+  const server = http.createServer((clientReq, clientRes) => {
+    const rawUrl = clientReq.url ?? '';
+    let target;
+    try {
+      target = new URL(
+        /^https?:\/\//i.test(rawUrl)
+          ? rawUrl
+          : `http://${clientReq.headers.host ?? ''}${rawUrl}`,
+      );
+    } catch {
+      clientRes.writeHead(400, { 'content-type': 'text/plain' });
+      clientRes.end('Bad Request');
+      return;
+    }
+
+    const targetPort = target.port
+      ? Number(target.port)
+      : target.protocol === 'https:'
+        ? 443
+        : 80;
+
+    let decision;
+    try {
+      decision = resolveProxy(target.hostname, targetPort, getConfig(), {
+        selfPort,
+      });
+    } catch (err) {
+      clientRes.writeHead(502, { 'content-type': 'text/plain' });
+      clientRes.end(
+        err?.code === 'proxy_loop' ? 'Proxy Loop Detected' : 'Bad Gateway',
+      );
+      return;
+    }
+
+    const headers = stripHopByHop(clientReq.headers);
+    let upstreamReq;
+
+    if (decision.action === 'direct') {
+      const mod = target.protocol === 'https:' ? https : http;
+      upstreamReq = mod.request({
+        hostname: target.hostname,
+        port: targetPort,
+        method: clientReq.method,
+        path: `${target.pathname}${target.search}`,
+        headers: { ...headers, host: target.host },
+        timeout: idleTimeoutMs,
+      });
+    } else {
+      const proxyUrl = new URL(decision.proxy);
+      const proxyPort = proxyUrl.port
+        ? Number(proxyUrl.port)
+        : proxyUrl.protocol === 'https:'
+          ? 443
+          : 80;
+      const authHeader = buildProxyAuthHeader(proxyUrl);
+      const mod = proxyUrl.protocol === 'https:' ? https : http;
+      upstreamReq = mod.request({
+        hostname: proxyUrl.hostname,
+        port: proxyPort,
+        method: clientReq.method,
+        path: target.href,
+        headers: {
+          ...headers,
+          host: target.host,
+          ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
+        },
+        timeout: idleTimeoutMs,
+      });
+    }
+
+    upstreamReq.on('response', (upstreamRes) => {
+      clientRes.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+      upstreamRes.pipe(clientRes);
+    });
+    upstreamReq.on('timeout', () => {
+      upstreamReq.destroy(proxyError('timeout', 'Gateway Timeout'));
+    });
+    upstreamReq.on('error', () => {
+      if (!clientRes.headersSent) {
+        clientRes.writeHead(502, { 'content-type': 'text/plain' });
+      }
+      clientRes.end('Bad Gateway');
+    });
+    clientReq.on('aborted', () => upstreamReq.destroy());
+    clientReq.pipe(upstreamReq);
+  });
+
+  server.on('connect', (req, clientSocket, head) => {
+    activeSockets.add(clientSocket);
+    clientSocket.once('close', () => activeSockets.delete(clientSocket));
+    clientSocket.setTimeout(idleTimeoutMs, () => clientSocket.destroy());
+
+    const authority = req.url ?? '';
+    let targetHost = '';
+    let targetPort = 443;
+    const ipv6Match = authority.match(/^\[([^\]]+)\]:(\d+)$/);
+    if (ipv6Match) {
+      targetHost = ipv6Match[1];
+      targetPort = Number(ipv6Match[2]);
+    } else {
+      const idx = authority.lastIndexOf(':');
+      if (idx > 0) {
+        targetHost = authority.slice(0, idx);
+        targetPort = Number(authority.slice(idx + 1));
+      }
+    }
+    if (
+      !targetHost ||
+      !Number.isInteger(targetPort) ||
+      targetPort < 1 ||
+      targetPort > 65535
+    ) {
+      clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      return;
+    }
+
+    let decision;
+    try {
+      decision = resolveProxy(targetHost, targetPort, getConfig(), {
+        selfPort,
+      });
+    } catch {
+      clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      return;
+    }
+
+    const wireTunnel = (upstreamSocket, buffered = Buffer.alloc(0)) => {
+      activeSockets.add(upstreamSocket);
+      upstreamSocket.once('close', () => activeSockets.delete(upstreamSocket));
+      upstreamSocket.setTimeout(idleTimeoutMs, () => upstreamSocket.destroy());
+
+      if (clientSocket.destroyed) {
+        upstreamSocket.destroy();
+        return;
+      }
+      clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (buffered.length > 0) clientSocket.write(buffered);
+      if (head && head.length > 0) upstreamSocket.write(head);
+
+      upstreamSocket.pipe(clientSocket);
+      clientSocket.pipe(upstreamSocket);
+
+      const teardown = () => {
+        if (!clientSocket.destroyed) clientSocket.destroy();
+        if (!upstreamSocket.destroyed) upstreamSocket.destroy();
+      };
+      clientSocket.on('error', teardown);
+      upstreamSocket.on('error', teardown);
+    };
+
+    if (decision.action === 'direct') {
+      const upstream = net.connect({ host: targetHost, port: targetPort });
+      const timer = setTimeout(() => {
+        upstream.destroy(proxyError('timeout', 'connect timeout'));
+      }, connectTimeoutMs);
+      timer.unref?.();
+
+      upstream.once('connect', () => {
+        clearTimeout(timer);
+        wireTunnel(upstream);
+      });
+      upstream.once('error', () => {
+        clearTimeout(timer);
+        if (!clientSocket.destroyed) {
+          clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+        }
+      });
+      clientSocket.once('close', () => {
+        clearTimeout(timer);
+        upstream.destroy();
+      });
+      return;
+    }
+
+    connectViaHttpProxy(decision.proxy, targetHost, targetPort, {
+      timeoutMs: connectTimeoutMs,
+    })
+      .then(({ socket, buffered }) => wireTunnel(socket, buffered))
+      .catch((err) => {
+        if (!clientSocket.destroyed) {
+          const code = err?.statusCode === 407 ? 407 : 502;
+          const text =
+            code === 407 ? 'Proxy Authentication Required' : 'Bad Gateway';
+          clientSocket.end(`HTTP/1.1 ${code} ${text}\r\n\r\n`);
+        }
+      });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.removeListener('error', reject);
+      const addr = server.address();
+      selfPort = typeof addr === 'object' && addr ? addr.port : 0;
+      resolve(undefined);
+    });
+  });
+
+  const url = `http://127.0.0.1:${selfPort}`;
+  return {
+    port: selfPort,
+    url,
+    env() {
+      const noProxy = BUILTIN_LOOPBACK_NO_PROXY.join(',');
+      return {
+        HTTP_PROXY: url,
+        HTTPS_PROXY: url,
+        http_proxy: url,
+        https_proxy: url,
+        NO_PROXY: noProxy,
+        no_proxy: noProxy,
+      };
+    },
+    async close() {
+      for (const s of activeSockets) s.destroy();
+      activeSockets.clear();
+      await new Promise((resolve) => server.close(() => resolve(undefined)));
+    },
+  };
+}
+
+// ------------------------------------------------------------ controlled fetch & WS agent
+
+/**
+ * Create an HTTP/HTTPS Agent that tunnels through an upstream HTTP/HTTPS proxy.
+ * Suitable for both `node:http`/`node:https` and `ws` (`new WebSocket(url, { agent })`).
+ *
+ * @param {string} proxyUrlStr
+ * @param {{ isTls: boolean, tlsOptions?: tls.ConnectionOptions, timeoutMs?: number }} options
+ */
+export function createProxyTunnelAgent(
+  proxyUrlStr,
+  { isTls, tlsOptions = {}, timeoutMs = 15_000 },
+) {
+  const Base = isTls ? https.Agent : http.Agent;
+  class ProxyTunnelAgent extends Base {
+    createConnection(options, callback) {
+      const targetHost = options.host ?? options.hostname;
+      const targetPort = Number(options.port ?? (isTls ? 443 : 80));
+      connectViaHttpProxy(proxyUrlStr, targetHost, targetPort, { timeoutMs })
+        .then(({ socket, buffered }) => {
+          if (buffered.length > 0) socket.unshift(buffered);
+          if (!isTls) {
+            callback(null, socket);
+            return;
+          }
+          const servername =
+            options.servername ?? (isIP(targetHost) ? undefined : targetHost);
+          const tlsSocket = tls.connect({
+            ...tlsOptions,
+            socket,
+            ...(servername ? { servername } : {}),
+            ...(options.ca !== undefined ? { ca: options.ca } : {}),
+            ...(options.rejectUnauthorized !== undefined
+              ? { rejectUnauthorized: options.rejectUnauthorized }
+              : {}),
+          });
+          callback(null, tlsSocket);
+        })
+        .catch((err) => callback(err));
+    }
+  }
+  return new ProxyTunnelAgent({ keepAlive: false });
+}
+
+/**
+ * Create a WebSocket Agent factory for `ws` based on dynamic proxy configuration.
+ * Returns `undefined` when direct (so `ws` connects directly without system proxy).
+ *
+ * @param {() => ReturnType<typeof validateProxyConfig>} getConfig
+ * @param {{ ca?: any, rejectUnauthorized?: boolean, timeoutMs?: number }} [tlsOpts]
+ */
+export function resolveWsProxyAgent(urlStr, getConfig, tlsOpts = {}) {
+  const parsed = new URL(urlStr);
+  const isTls = parsed.protocol === 'wss:' || parsed.protocol === 'https:';
+  const port = parsed.port ? Number(parsed.port) : isTls ? 443 : 80;
+  const decision = resolveProxy(parsed.hostname, port, getConfig());
+  if (decision.action === 'direct') return undefined;
+  return createProxyTunnelAgent(decision.proxy, {
+    isTls,
+    tlsOptions: {
+      ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {}),
+      ...(tlsOpts.rejectUnauthorized !== undefined
+        ? { rejectUnauthorized: tlsOpts.rejectUnauthorized }
+        : {}),
+    },
+    timeoutMs: tlsOpts.timeoutMs,
+  });
+}
+
+async function bodyToBuffer(body) {
+  if (body === undefined || body === null) return null;
+  if (typeof body === 'string') return Buffer.from(body, 'utf8');
+  if (Buffer.isBuffer(body)) return body;
+  if (body instanceof Uint8Array)
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  if (body instanceof ArrayBuffer) return Buffer.from(body);
+  if (body instanceof URLSearchParams)
+    return Buffer.from(body.toString(), 'utf8');
+  if (typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    const chunks = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  }
+  if (typeof body[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    for await (const chunk of body) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
+  return Buffer.from(String(body), 'utf8');
+}
+
+function normalizeHeaders(headersInit) {
+  const out = {};
+  if (!headersInit) return out;
+  if (typeof headersInit.forEach === 'function') {
+    headersInit.forEach((v, k) => {
+      out[k] = v;
+    });
+    return out;
+  }
+  if (Array.isArray(headersInit)) {
+    for (const [k, v] of headersInit) out[k] = v;
+    return out;
+  }
+  for (const [k, v] of Object.entries(headersInit)) {
+    if (v !== undefined) out[k] = String(v);
+  }
+  return out;
+}
+
+/**
+ * Create a Fetch-compatible function that strictly obeys Auriga proxy rules
+ * and NEVER uses OS/environment proxy settings.
+ *
+ * @param {() => ReturnType<typeof validateProxyConfig>} getConfig
+ * @returns {typeof globalThis.fetch}
+ */
+export function createControlledFetch(getConfig) {
+  const directHttpAgent = new http.Agent({ keepAlive: true });
+  const directHttpsAgent = new https.Agent({ keepAlive: true });
+
+  return async function controlledFetch(input, init = {}) {
+    const urlStr =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    const url = new URL(urlStr);
+    const isHttps = url.protocol === 'https:';
+    const port = url.port ? Number(url.port) : isHttps ? 443 : 80;
+    const method = (
+      init.method ??
+      (typeof input === 'object' && 'method' in input ? input.method : 'GET')
+    ).toUpperCase();
+    const headers = normalizeHeaders(init.headers);
+    const signal = init.signal;
+    const bodyBuf = await bodyToBuffer(init.body);
+    if (
+      bodyBuf &&
+      !Object.keys(headers).some((k) => k.toLowerCase() === 'content-length')
+    ) {
+      headers['content-length'] = String(bodyBuf.length);
+    }
+
+    const decision = resolveProxy(url.hostname, port, getConfig());
+
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(
+          signal.reason ??
+            proxyError('AbortError', 'The operation was aborted'),
+        );
+        return;
+      }
+
+      let req;
+      if (decision.action === 'direct') {
+        const mod = isHttps ? https : http;
+        req = mod.request({
+          hostname: url.hostname,
+          port,
+          method,
+          path: `${url.pathname}${url.search}`,
+          headers,
+          agent: isHttps ? directHttpsAgent : directHttpAgent,
+        });
+      } else if (isHttps) {
+        const agent = createProxyTunnelAgent(decision.proxy, { isTls: true });
+        req = https.request({
+          hostname: url.hostname,
+          port,
+          method,
+          path: `${url.pathname}${url.search}`,
+          headers,
+          agent,
+        });
+      } else {
+        const proxyUrl = new URL(decision.proxy);
+        const proxyPort = proxyUrl.port
+          ? Number(proxyUrl.port)
+          : proxyUrl.protocol === 'https:'
+            ? 443
+            : 80;
+        const authHeader = buildProxyAuthHeader(proxyUrl);
+        const mod = proxyUrl.protocol === 'https:' ? https : http;
+        req = mod.request({
+          hostname: proxyUrl.hostname,
+          port: proxyPort,
+          method,
+          path: url.href,
+          headers: {
+            ...headers,
+            host: url.host,
+            ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
+          },
+          agent: false,
+        });
+      }
+
+      const onAbort = () => {
+        const err =
+          signal.reason ??
+          Object.assign(new Error('The operation was aborted'), {
+            name: 'AbortError',
+          });
+        req.destroy(err);
+        reject(err);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      req.once('error', (err) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+
+      req.once('response', (res) => {
+        signal?.removeEventListener('abort', onAbort);
+        const status = res.statusCode ?? 502;
+
+        // Honor redirect: 'error' (used by shell-auth & updater).
+        if (
+          init.redirect === 'error' &&
+          status >= 300 &&
+          status < 400 &&
+          res.headers.location
+        ) {
+          res.resume();
+          reject(new TypeError('Failed to fetch: unexpected redirect'));
+          return;
+        }
+
+        const respHeaders = new globalThis.Headers();
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (v === undefined) continue;
+          if (Array.isArray(v)) {
+            for (const item of v) respHeaders.append(k, item);
+          } else {
+            respHeaders.set(k, v);
+          }
+        }
+
+        const nullBody =
+          status === 204 ||
+          status === 205 ||
+          status === 304 ||
+          method === 'HEAD';
+        const stream = nullBody ? null : Readable.toWeb(res);
+        if (nullBody) res.resume();
+
+        const response = new globalThis.Response(stream, {
+          status,
+          statusText: res.statusMessage ?? '',
+          headers: respHeaders,
+        });
+        resolve(response);
+      });
+
+      if (bodyBuf) req.end(bodyBuf);
+      else req.end();
+    });
+  };
+}
+
+/**
+ * Probe connectivity to a target URL through the active proxy configuration.
+ * Returns matched rule, redacted proxy, reachability, latency or fixed error reason.
+ *
+ * @param {string} targetInput
+ * @param {() => ReturnType<typeof validateProxyConfig>} getConfig
+ * @param {{ timeoutMs?: number }} [options]
+ */
+export async function testProxyTarget(
+  targetInput,
+  getConfig,
+  { timeoutMs = 8_000 } = {},
+) {
+  if (
+    typeof targetInput !== 'string' ||
+    !targetInput.trim() ||
+    targetInput.length > 2048
+  ) {
+    throw proxyError('invalidTarget', '请输入有效的测试域名或 URL');
+  }
+  const trimmed = targetInput.trim();
+  let url;
+  try {
+    url = new URL(
+      /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+    );
+  } catch {
+    throw proxyError('invalidTarget', '测试目标格式无效');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
+    throw proxyError('invalidTarget', '仅支持测试 HTTP/HTTPS 目标');
+  }
+  const port = url.port
+    ? Number(url.port)
+    : url.protocol === 'https:'
+      ? 443
+      : 80;
+  const config = getConfig();
+  const decision = resolveProxy(url.hostname, port, config);
+  const redactedProxy = decision.proxy
+    ? maskProxyUrl(decision.proxy).display
+    : '';
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(proxyError('timeout', '连接超时')),
+    timeoutMs,
+  );
+  timer.unref?.();
+
+  try {
+    const fetcher = createControlledFetch(() => config);
+    const response = await fetcher(url.href, {
+      method: 'HEAD',
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    await response.body?.cancel().catch(() => {});
+    return {
+      url: url.href,
+      action: decision.action,
+      proxy: redactedProxy,
+      matchedBy: decision.matchedBy,
+      reachable: true,
+      status: response.status,
+      latencyMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    const code = err?.code ?? '';
+    let reason = 'network';
+    if (
+      code === 'timeout' ||
+      err?.name === 'TimeoutError' ||
+      err?.name === 'AbortError'
+    ) {
+      reason = 'timeout';
+    } else if (code === 'proxy_auth_required') {
+      reason = 'proxy_auth_required';
+    } else if (code === 'proxy_unreachable' || code === 'proxy_error') {
+      reason = 'proxy_unreachable';
+    } else if (code === 'proxy_loop') {
+      reason = 'proxy_loop';
+    } else if (
+      /tls|cert|ssl/i.test(String(code) + ' ' + String(err?.message ?? ''))
+    ) {
+      reason = 'tls_error';
+    }
+    return {
+      url: url.href,
+      action: decision.action,
+      proxy: redactedProxy,
+      matchedBy: decision.matchedBy,
+      reachable: false,
+      reason,
+      latencyMs: Date.now() - startedAt,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shell-owned proxy runtime factory loaded by DSH plugin (analogous to update.mjs).
+ * @param {{ dataHome: string, defaultsFile?: string | null }} options
+ */
+export function createProxyRuntime({ dataHome, defaultsFile = null }) {
+  const store = createProxyConfigStore({ dataHome, defaultsFile });
+  return {
+    snapshot: () => store.snapshot(),
+    save: (input) => store.save(input),
+    reset: () => store.reset(),
+    test: (targetUrl) => testProxyTarget(targetUrl, () => store.get().config),
+    getConfig: () => store.get().config,
+    createFetch: () => createControlledFetch(() => store.get().config),
+  };
+}

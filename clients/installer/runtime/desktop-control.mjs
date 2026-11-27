@@ -7,6 +7,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readState, versionDir } from './core.mjs';
 import { approvePending, createUpdater, idleRequest } from './update.mjs';
+import {
+  bundledDefaultsPath,
+  createControlledFetch,
+  createProxyConfigStore,
+} from './network-proxy.mjs';
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const optionalJson = (file) => (existsSync(file) ? readJson(file) : null);
@@ -75,10 +80,28 @@ export function desktopUpdater(
     throw Object.assign(new Error('desktop platform address not configured'), {
       code: 'desktop.update_unconfigured',
     });
+  let controlledFetcher;
+  if (!request) {
+    const state = readState(root);
+    if (state?.dataHome) {
+      const store = createProxyConfigStore({
+        dataHome: state.dataHome,
+        defaultsFile: state.current
+          ? bundledDefaultsPath(versionDir(root, state.current))
+          : null,
+      });
+      controlledFetcher = createControlledFetch(() => store.get().config);
+    }
+  }
   return createUpdater({
     root,
     origin: binding.origin,
-    request: request ?? idleRequest(binding.origin),
+    request:
+      request ??
+      idleRequest(
+        binding.origin,
+        controlledFetcher ? { fetcher: controlledFetcher } : {},
+      ),
     ...(publicKey ? { publicKey } : {}),
     onState,
     requireApproval,

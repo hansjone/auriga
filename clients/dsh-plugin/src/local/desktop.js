@@ -101,9 +101,30 @@ export async function idleFetch(url, init, lifetime, idleMs = 60_000) {
   }
 }
 
+/** Shell-owned proxy runtime capability. Absent in managed/plugin-only DSH. */
+export async function desktopProxyController() {
+  const root = process.env.AURIGA_DESKTOP_ROOT;
+  const runtimePath = process.env.AURIGA_DESKTOP_PROXY_RUNTIME;
+  if (!root || !runtimePath) return undefined;
+  const state = JSON.parse(await readFile(join(root, 'install.json'), 'utf8'));
+  if (!state?.current || !state?.dataHome) return undefined;
+  const expectedPath = resolve(
+    root,
+    'versions',
+    state.current,
+    'auriga/runtime/network-proxy.mjs',
+  );
+  if (expectedPath !== resolve(runtimePath)) return undefined;
+  const mod = await import(pathToFileURL(expectedPath).href);
+  return mod.createProxyRuntime({
+    dataHome: state.dataHome,
+    defaultsFile: join(root, 'versions', state.current, 'auriga/defaults.json'),
+  });
+}
+
 /** Installer-owned capability. An ordinary/plugin-only DSH has no updater.
- * @param {{origin:string}} options */
-export async function desktopUpdater({ origin }) {
+ * @param {{origin:string,proxyController?:{createFetch:()=>typeof fetch}}} options */
+export async function desktopUpdater({ origin, proxyController }) {
   const root = process.env.AURIGA_DESKTOP_ROOT;
   if (!root || !process.env.AURIGA_DESKTOP_RUNTIME) return undefined;
   const state = JSON.parse(await readFile(join(root, 'install.json'), 'utf8'));
@@ -152,12 +173,26 @@ export async function desktopUpdater({ origin }) {
   const module = await import(pathToFileURL(modulePath).href);
   module.platformUrl(origin, 'latest', bound);
   const lifetime = new AbortController();
+  const shellRequest =
+    proxyController && typeof module.idleRequest === 'function'
+      ? module.idleRequest(origin, {
+          fetcher: proxyController.createFetch(),
+        })
+      : undefined;
   const updater = module.createUpdater({
     root,
     origin,
     request: async (/** @type {string} */ url, /** @type {any} */ init) => {
       if (new URL(url).origin !== origin)
         throw new Error('untrusted desktop download');
+      if (shellRequest) {
+        return shellRequest(url, {
+          ...init,
+          signal: init.signal
+            ? AbortSignal.any([lifetime.signal, init.signal])
+            : lifetime.signal,
+        });
+      }
       return idleFetch(
         url,
         {

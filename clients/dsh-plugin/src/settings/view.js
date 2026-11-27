@@ -96,6 +96,45 @@ const messages = {
     notProvided: '未提供',
     expired: '平台登录已过期',
     retry: '重试',
+    proxyTitle: '网络代理',
+    proxyHint:
+      '默认忽略操作系统代理，所有网络请求、自动升级与工具子进程均受此处控制。',
+    proxySourceBundled: '当前使用安装包内置默认配置',
+    proxySourceUser: '当前使用自定义配置',
+    proxySourceBuiltin: '当前使用默认直连配置',
+    proxyDegraded: '本地代理配置无效，已回退默认配置。',
+    proxyMode: '代理模式',
+    proxyModeDirect: '直连（不使用系统代理）',
+    proxyModeCustom: '自定义代理',
+    proxyGlobal: '全局代理地址',
+    proxyGlobalPlaceholder: 'http://127.0.0.1:7890（留空则仅按域名规则代理）',
+    proxyNoProxy: '全局直连（NoProxy）',
+    proxyNoProxyPlaceholder: '*.corp.local, 192.0.2.0/24',
+    proxyBuiltinNoProxy: '已内置强制直连：',
+    proxyRules: '按域名分流规则',
+    proxyRulePattern: '域名 / 通配 / CIDR',
+    proxyRuleAction: '策略',
+    proxyRuleProxy: '走代理',
+    proxyRuleDirect: '直连',
+    proxyRuleTarget: '代理地址',
+    proxyRuleAdd: '新增规则',
+    proxyRuleUp: '上移',
+    proxyRuleDown: '下移',
+    proxyRuleDelete: '删除',
+    proxyReset: '恢复默认',
+    proxyResetDone: '已恢复默认代理配置',
+    proxyTestTarget: '测试目标',
+    proxyTestPlaceholder: 'https://example.com 或域名',
+    proxyTestRun: '测试命中与连通',
+    proxyTestReachable: '可达',
+    proxyTestUnreachable: '不可达',
+    invalidProxyUrl: '代理地址无效（仅支持 http:// 或 https://）',
+    invalidPattern: '域名或 CIDR 规则格式无效',
+    invalidTarget: '请输入有效的测试域名或 URL',
+    proxy_loop: '代理地址不能指向客户端本地分流端口',
+    proxy_unreachable: '代理不可达',
+    proxy_auth_required: '代理需要身份验证 (407)',
+    tls_error: 'TLS 证书校验失败',
   },
   en: {
     desktop: 'Desktop updates',
@@ -195,6 +234,46 @@ const messages = {
     notProvided: 'Not supplied',
     expired: 'Platform sign-in expired',
     retry: 'Retry',
+    proxyTitle: 'Network proxy',
+    proxyHint:
+      'System proxy is ignored by default. All requests, auto-updates, and tool subprocesses follow this configuration.',
+    proxySourceBundled: 'Using installer bundled default',
+    proxySourceUser: 'Using custom configuration',
+    proxySourceBuiltin: 'Using built-in direct mode',
+    proxyDegraded:
+      'Saved proxy configuration was invalid; fell back to default.',
+    proxyMode: 'Mode',
+    proxyModeDirect: 'Direct (ignore system proxy)',
+    proxyModeCustom: 'Custom proxy',
+    proxyGlobal: 'Global proxy URL',
+    proxyGlobalPlaceholder: 'http://127.0.0.1:7890 (empty = domain rules only)',
+    proxyNoProxy: 'Global NoProxy',
+    proxyNoProxyPlaceholder: '*.corp.local, 192.0.2.0/24',
+    proxyBuiltinNoProxy: 'Always direct: ',
+    proxyRules: 'Per-domain rules',
+    proxyRulePattern: 'Domain / Wildcard / CIDR',
+    proxyRuleAction: 'Action',
+    proxyRuleProxy: 'Proxy',
+    proxyRuleDirect: 'Direct',
+    proxyRuleTarget: 'Proxy URL',
+    proxyRuleAdd: 'Add rule',
+    proxyRuleUp: 'Up',
+    proxyRuleDown: 'Down',
+    proxyRuleDelete: 'Remove',
+    proxyReset: 'Reset to default',
+    proxyResetDone: 'Proxy reset to default',
+    proxyTestTarget: 'Test target',
+    proxyTestPlaceholder: 'https://example.com or hostname',
+    proxyTestRun: 'Test route',
+    proxyTestReachable: 'Reachable',
+    proxyTestUnreachable: 'Unreachable',
+    invalidProxyUrl: 'Invalid proxy URL (http:// or https:// only)',
+    invalidPattern: 'Invalid domain or CIDR pattern',
+    invalidTarget: 'Enter a valid target URL or hostname',
+    proxy_loop: 'Proxy URL cannot point to the local router port',
+    proxy_unreachable: 'Proxy unreachable',
+    proxy_auth_required: 'Proxy authentication required (407)',
+    tls_error: 'TLS verification failed',
   },
 };
 
@@ -747,6 +826,293 @@ export function createSettingsView(
     );
   }
 
+  function NetworkProxyView(
+    /** @type {{t:typeof messages.zh,proxy:any,busy:boolean,onSave:(payload:any)=>Promise<void>,onReset:()=>Promise<void>,onTest:(url:string)=>Promise<any>}} */ {
+      t,
+      proxy,
+      busy,
+      onSave,
+      onReset,
+      onTest,
+    },
+  ) {
+    const [mode, setMode] = React.useState(proxy.mode ?? 'direct');
+    const [globalProxy, setGlobalProxy] = React.useState(
+      proxy.globalProxy ?? '',
+    );
+    const [noProxyText, setNoProxyText] = React.useState(
+      (proxy.noProxy ?? []).join(', '),
+    );
+    const [rules, setRules] = React.useState(
+      (proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })),
+    );
+    const [testUrl, setTestUrl] = React.useState('');
+    const [testResult, setTestResult] = React.useState(null);
+    React.useEffect(() => {
+      setMode(proxy.mode ?? 'direct');
+      setGlobalProxy(proxy.globalProxy ?? '');
+      setNoProxyText((proxy.noProxy ?? []).join(', '));
+      setRules((proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })));
+    }, [proxy]);
+
+    const updateRule = (
+      /** @type {number} */ idx,
+      /** @type {Record<string, any>} */ patch,
+    ) =>
+      setRules((/** @type {any[]} */ prev) =>
+        prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)),
+      );
+    const moveRule = (/** @type {number} */ idx, /** @type {number} */ delta) =>
+      setRules((/** @type {any[]} */ prev) => {
+        const next = [...prev];
+        const target = idx + delta;
+        if (target < 0 || target >= next.length) return prev;
+        [next[idx], next[target]] = [next[target], next[idx]];
+        return next;
+      });
+    const removeRule = (/** @type {number} */ idx) =>
+      setRules((/** @type {any[]} */ prev) => prev.filter((_, i) => i !== idx));
+    const addRule = () =>
+      setRules((/** @type {any[]} */ prev) => [
+        ...prev,
+        {
+          id: 'rule-' + Date.now() + '-' + (prev.length + 1),
+          enabled: true,
+          pattern: '',
+          action: 'proxy',
+          proxy: '',
+        },
+      ]);
+
+    const buildPayload = () => ({
+      schemaVersion: 1,
+      mode,
+      globalProxy: globalProxy.trim(),
+      noProxy: noProxyText
+        .split(/[\n,]/)
+        .map((/** @type {string} */ s) => s.trim())
+        .filter(Boolean),
+      rules: rules.map((/** @type {any} */ r, /** @type {number} */ idx) => ({
+        id: r.id || `rule-${idx + 1}`,
+        enabled: r.enabled !== false,
+        pattern: String(r.pattern ?? '').trim(),
+        action: r.action === 'direct' ? 'direct' : 'proxy',
+        proxy: r.action === 'direct' ? '' : String(r.proxy ?? '').trim(),
+      })),
+    });
+
+    const sourceLabel =
+      proxy.source === 'user'
+        ? t.proxySourceUser
+        : proxy.source === 'bundled'
+          ? t.proxySourceBundled
+          : t.proxySourceBuiltin;
+
+    return h(
+      'section',
+      { 'aria-label': t.proxyTitle },
+      h('h3', null, t.proxyTitle),
+      h('p', null, t.proxyHint),
+      h('p', { role: 'status' }, sourceLabel),
+      proxy.degraded && h('p', { role: 'alert' }, t.proxyDegraded),
+      h(
+        'label',
+        { className: 'auriga-setting' },
+        h('span', null, t.proxyMode),
+        h(
+          'select',
+          {
+            'aria-label': t.proxyMode,
+            value: mode,
+            disabled: busy,
+            onChange: (/** @type {any} */ e) => setMode(e.target.value),
+          },
+          h('option', { value: 'direct' }, t.proxyModeDirect),
+          h('option', { value: 'proxy' }, t.proxyModeCustom),
+        ),
+      ),
+      mode === 'proxy' &&
+        h(
+          React.Fragment,
+          null,
+          h(
+            'label',
+            { className: 'auriga-setting' },
+            h('span', null, t.proxyGlobal),
+            h('input', {
+              'aria-label': t.proxyGlobal,
+              value: globalProxy,
+              placeholder: t.proxyGlobalPlaceholder,
+              disabled: busy,
+              onChange: (/** @type {any} */ e) =>
+                setGlobalProxy(e.target.value),
+            }),
+          ),
+          h(
+            'label',
+            { className: 'auriga-setting' },
+            h('span', null, t.proxyNoProxy),
+            h('textarea', {
+              'aria-label': t.proxyNoProxy,
+              rows: 2,
+              value: noProxyText,
+              placeholder: t.proxyNoProxyPlaceholder,
+              disabled: busy,
+              onChange: (/** @type {any} */ e) =>
+                setNoProxyText(e.target.value),
+            }),
+          ),
+          h(
+            'p',
+            null,
+            t.proxyBuiltinNoProxy +
+              (proxy.builtinNoProxy ?? ['localhost', '127.0.0.1', '::1']).join(
+                ', ',
+              ),
+          ),
+          h('h4', null, t.proxyRules),
+          ...rules.map((/** @type {any} */ rule, /** @type {number} */ idx) =>
+            h(
+              'div',
+              { key: rule.id ?? idx, className: 'auriga-proxy-rule' },
+              h('input', {
+                type: 'checkbox',
+                checked: rule.enabled !== false,
+                disabled: busy,
+                onChange: (/** @type {any} */ e) =>
+                  updateRule(idx, { enabled: e.target.checked }),
+              }),
+              h('input', {
+                'aria-label': t.proxyRulePattern,
+                placeholder: t.proxyRulePattern,
+                value: rule.pattern ?? '',
+                disabled: busy,
+                onChange: (/** @type {any} */ e) =>
+                  updateRule(idx, { pattern: e.target.value }),
+              }),
+              h(
+                'select',
+                {
+                  'aria-label': t.proxyRuleAction,
+                  value: rule.action === 'direct' ? 'direct' : 'proxy',
+                  disabled: busy,
+                  onChange: (/** @type {any} */ e) =>
+                    updateRule(idx, { action: e.target.value }),
+                },
+                h('option', { value: 'proxy' }, t.proxyRuleProxy),
+                h('option', { value: 'direct' }, t.proxyRuleDirect),
+              ),
+              h('input', {
+                'aria-label': t.proxyRuleTarget,
+                placeholder: t.proxyRuleTarget,
+                value: rule.action === 'direct' ? '' : (rule.proxy ?? ''),
+                disabled: busy || rule.action === 'direct',
+                onChange: (/** @type {any} */ e) =>
+                  updateRule(idx, { proxy: e.target.value }),
+              }),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: busy || idx === 0,
+                  onClick: () => moveRule(idx, -1),
+                },
+                t.proxyRuleUp,
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: busy || idx === rules.length - 1,
+                  onClick: () => moveRule(idx, 1),
+                },
+                t.proxyRuleDown,
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: busy,
+                  onClick: () => removeRule(idx),
+                },
+                t.proxyRuleDelete,
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'auriga-setting-actions' },
+            h(
+              'button',
+              { type: 'button', disabled: busy, onClick: addRule },
+              t.proxyRuleAdd,
+            ),
+          ),
+        ),
+      h(
+        'div',
+        { className: 'auriga-setting-actions' },
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: busy,
+            onClick: () => onSave(buildPayload()),
+          },
+          t.save,
+        ),
+        (proxy.source === 'user' || proxy.hasBundledDefault) &&
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: busy,
+              onClick: () => onReset(),
+            },
+            t.proxyReset,
+          ),
+      ),
+      h(
+        'div',
+        { className: 'auriga-setting-actions' },
+        h('input', {
+          'aria-label': t.proxyTestTarget,
+          placeholder: t.proxyTestPlaceholder,
+          value: testUrl,
+          disabled: busy,
+          onChange: (/** @type {any} */ e) => setTestUrl(e.target.value),
+        }),
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: busy || !testUrl.trim(),
+            onClick: async () => {
+              const res = await onTest(testUrl.trim());
+              if (res) setTestResult(res);
+            },
+          },
+          t.proxyTestRun,
+        ),
+      ),
+      testResult &&
+        h(
+          'p',
+          { role: 'status' },
+          `${testResult.matchedBy} → ${
+            testResult.action === 'proxy' ? testResult.proxy : t.proxyRuleDirect
+          } · ${
+            testResult.reachable
+              ? `${t.proxyTestReachable} (${testResult.latencyMs}ms)`
+              : `${t.proxyTestUnreachable}: ${
+                  t[/** @type {keyof typeof t} */ (testResult.reason)] ??
+                  testResult.reason
+                }`
+          }`,
+        ),
+    );
+  }
+
   return function SettingsView(
     /** @type {{locale:string,boot?:any,consent?:any,gotoOverview?:()=>void}} */ {
       locale,
@@ -1276,6 +1642,32 @@ export function createSettingsView(
             state.platformOrigin !== state.activeOrigin &&
             h('p', null, t.pending),
         ),
+      !managed &&
+        state?.proxy &&
+        h(NetworkProxyView, {
+          t,
+          proxy: state.proxy,
+          busy,
+          onSave: (/** @type {any} */ payload) =>
+            run(async () => {
+              const next = await call('auriga/settings/proxy', payload);
+              setState(next);
+              setNotice(t.saved);
+            }),
+          onReset: () =>
+            run(async () => {
+              const next = await call('auriga/settings/proxy/reset', {});
+              setState(next);
+              setNotice(t.proxyResetDone);
+            }),
+          onTest: async (/** @type {string} */ url) => {
+            let result = null;
+            await run(async () => {
+              result = await call('auriga/settings/proxy/test', { url });
+            });
+            return result;
+          },
+        }),
       h(
         'section',
         { 'aria-label': t.networkTitle },

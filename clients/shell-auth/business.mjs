@@ -69,6 +69,7 @@ export class BusinessProxy {
       config: broker.platform.config.network,
       core: hostOptions.networkCore,
       fetcher,
+      resolveWsAgent: hostOptions.resolveWsAgent,
     });
     this.team = new TeamProxy(broker, this.streams, fetcher, this.host);
     this.broker = broker;

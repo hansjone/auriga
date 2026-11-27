@@ -38,7 +38,8 @@ const KEY_HELP = `
   --verify-key（别名 --devkit-verify-key）：独立批准的套件/源码发行验签公钥；套件自带 release-public.pem 不能自证信任。
   --release-public-key（别名 --site-release-public-key）：站点桌面发行公钥，将写入安装包；与套件验签公钥分开。
   --trust-fingerprint：从独立可信渠道取得的套件/源码发行公钥 SPKI SHA-256，不能从待验套件自取后当作批准值。
-  --uac-config-dir <目录>：可选，包含 adapter.json 与 provider.json；实际写入包内 payload/auriga/uac/。未提供则不含本地 UAC 配置。`;
+  --uac-config-dir <目录>：可选，包含 adapter.json 与 provider.json；实际写入包内 payload/auriga/uac/。未提供则不含本地 UAC 配置。
+  --default-proxy-file <JSON文件>：可选，现场内置默认网络代理配置；校验后写入包内 payload/auriga/defaults.json。未提供则默认直连且不使用系统代理。`;
 
 export function normalizeBuildAliases(options) {
   const normalized = { ...options };
@@ -203,6 +204,7 @@ export async function main(argv, diagnostics = {}) {
         'site-release-public-key',
         'resource-trust-json',
         'uac-config-dir',
+        'default-proxy-file',
         'version',
         'sequence',
         'minimum-version',

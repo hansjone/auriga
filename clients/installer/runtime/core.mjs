@@ -24,6 +24,14 @@ import { startShellAuth, registerFallbackLogin } from './shell-auth.mjs';
 import { createDesktopReporter } from './desktop-report.mjs';
 import { assertLocalPath } from './host-lock.mjs';
 import { pathOperationLock, processAlive } from './operation-lock.mjs';
+import {
+  bundledDefaultsPath,
+  createControlledFetch,
+  createProxyConfigStore,
+  resolveWsProxyAgent,
+  startLocalProxyServer,
+  stripSystemProxyEnv,
+} from './network-proxy.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -496,7 +504,12 @@ function syncPlugin(dir, dataHome) {
 // ----------------------------------------------------------------- smoke --
 
 /** Environment inherited by DSH and its shell tools; never changes system settings. */
-export function launchEnv(dir, dataHome, base = process.env) {
+export function launchEnv(
+  dir,
+  dataHome,
+  base = process.env,
+  { localProxy } = {},
+) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
   const python = join(dir, 'runtime', 'python');
@@ -516,9 +529,16 @@ export function launchEnv(dir, dataHome, base = process.env) {
     join(dir, 'tools', 'bin'),
     dirname(nodeBin(dir)),
   ].filter(Boolean);
-  const clean = cleanPythonEnv(base);
+  const clean = stripSystemProxyEnv(cleanPythonEnv(base));
+  const proxyEnv = localProxy
+    ? localProxy.env()
+    : {
+        NO_PROXY: '*',
+        no_proxy: '*',
+      };
   return {
     ...clean,
+    ...proxyEnv,
     PYTHONNOUSERSITE: '1',
     PYTHONDONTWRITEBYTECODE: '1',
     ...(personal
@@ -1656,7 +1676,12 @@ async function launchLocked({
     }),
   );
   const releaseSingleton = tree.singleton();
-  let session, shellAuth, shellFailure, statusTimer, desktopReporter;
+  let session,
+    shellAuth,
+    shellFailure,
+    statusTimer,
+    desktopReporter,
+    localProxy;
   const hasShell = existsSync(
     join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
   );
@@ -1716,12 +1741,26 @@ async function launchLocked({
       await verifyPackageAsync(dir, { trees: false });
     syncBundledUacConfig(profileDir(state.dataHome), dir);
     supervisor.trust = packagedTrust(dir);
+    const proxyStore = createProxyConfigStore({
+      dataHome: state.dataHome,
+      defaultsFile: bundledDefaultsPath(dir),
+    });
+    localProxy = await startLocalProxyServer({
+      getConfig: () => proxyStore.get().config,
+    });
+    const controlledFetch = createControlledFetch(
+      () => proxyStore.get().config,
+    );
+    const resolveWsAgent = (url, tlsOpts) =>
+      resolveWsProxyAgent(url, () => proxyStore.get().config, tlsOpts);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
       supervisor.shellSnapshot = () => shellAuth?.snapshot();
       shellAuth = await startShellAuth({
         root,
         dataHome: state.dataHome,
         dir,
+        fetcher: controlledFetch,
+        resolveWsAgent,
         onFailure: (reason) => {
           shellFailure = reason;
         },
@@ -1795,11 +1834,20 @@ async function launchLocked({
                   ? ['pipe']
                   : []),
             ],
-            env: launchEnv(dir, state.dataHome, {
-              ...env,
-              AURIGA_DESKTOP_ROOT: root,
-              AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
-            }),
+            env: launchEnv(
+              dir,
+              state.dataHome,
+              {
+                ...env,
+                AURIGA_DESKTOP_ROOT: root,
+                AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+                AURIGA_DESKTOP_PROXY_RUNTIME: join(
+                  dir,
+                  'auriga/runtime/network-proxy.mjs',
+                ),
+              },
+              { localProxy },
+            ),
           },
         ),
     });
@@ -1815,7 +1863,11 @@ async function launchLocked({
       try {
         await shellAuth?.close();
       } finally {
-        await tree.stopTree();
+        try {
+          await localProxy?.close();
+        } finally {
+          await tree.stopTree();
+        }
       }
     } finally {
       session?.close();

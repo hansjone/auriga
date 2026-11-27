@@ -1,4 +1,5 @@
 import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
+import { validateProxyConfig } from '../runtime/network-proxy.mjs';
 /**
  * Build the Desktop installer package.
  *
@@ -581,17 +582,31 @@ export async function build(args) {
     join(payload, 'licenses', 'LICENSE.auriga-dsh.txt'),
   );
   writeFileSync(join(payload, 'licenses', 'NOTICE.txt'), NOTICE);
+  const defaultsPayload = {};
   if (args['platform-origin']) {
     const selected = normalizePlatformBinding(args['platform-origin'], {
       accessMode: args['platform-access-mode'],
       confirmedOrigin: args['confirm-platform-origin'],
     });
     const { origin, ...platformBinding } = selected;
+    defaultsPayload.platformOrigin = origin;
+    defaultsPayload.platformBinding = platformBinding;
+  }
+  if (args['default-proxy-file']) {
+    const proxyFile = resolve(String(args['default-proxy-file']));
+    const st = lstatSync(proxyFile);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > 65536) {
+      throw new Error('invalid --default-proxy-file');
+    }
+    defaultsPayload.networkProxy = validateProxyConfig(
+      JSON.parse(readFileSync(proxyFile, 'utf8')),
+    );
+  }
+  if (Object.keys(defaultsPayload).length > 0) {
     mkdirSync(join(payload, 'auriga'), { recursive: true });
     writeFileSync(
       join(payload, 'auriga', 'defaults.json'),
-      JSON.stringify({ platformOrigin: origin, platformBinding }, null, 2) +
-        '\n',
+      JSON.stringify(defaultsPayload, null, 2) + '\n',
     );
   }
 

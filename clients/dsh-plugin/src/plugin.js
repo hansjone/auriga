@@ -23,6 +23,7 @@ import { installResourceChannel } from './resources/channel.js';
 import { createMemberRoutes } from './resources/member-routes.js';
 import { createLocalUacIdentity } from './local/uac/session.js';
 import { createUacRoutes } from './local/uac/routes.js';
+import { desktopProxyController } from './local/desktop.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -36,6 +37,10 @@ export async function apply(ctx, config) {
   installObservability(ctx);
   const mode = selectMode();
   let binding, profileOwner, memberResources, managedRuntime, localUac;
+  const proxyController =
+    mode === 'managed'
+      ? undefined
+      : await desktopProxyController().catch(() => undefined);
   installBaseToolsHost(ctx, () =>
     mode === 'managed' ? managedRuntime?.baseTools : binding?.runtime.baseTools,
   );
@@ -53,6 +58,7 @@ export async function apply(ctx, config) {
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           desktop: () => binding?.runtime.desktop,
+          proxy: () => proxyController,
           broker: () => binding?.runtime.broker,
           networkControl: () => binding?.runtime.networkControl,
           nativeAuth: {
@@ -343,6 +349,7 @@ export async function apply(ctx, config) {
                   directory: join(profile.dir, 'auriga-connect'),
                   ctx: connectCtx,
                   localUac: uac,
+                  proxyController,
                 });
                 try {
                   await resources.beforeIdentity(runtime);
