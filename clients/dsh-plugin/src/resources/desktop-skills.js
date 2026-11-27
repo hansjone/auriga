@@ -696,6 +696,7 @@ export function desktopSkills({ home, time = hostTime }) {
         (/** @type {any} */ old) =>
           old.state !== 'failed' ||
           old.resource.identity.kind !== 'plugin' ||
+          desiredState(old.resource) !== 'DISABLED' ||
           requested.has(old.resource.identity.packageId),
       );
       if (rows.length !== applicable.length) return false;
@@ -739,8 +740,7 @@ export function desktopSkills({ home, time = hostTime }) {
       if (!prepared) return false;
       try {
         for (const r of value.installations.filter(
-          (/** @type {any} */ r) =>
-            r.state !== 'failed' && desiredState(r.resource) === 'ENABLED',
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
         )) {
           cached(who, r.resource.identity.manifestDigest);
           for (const a of r.resource.artifacts) cached(who, a.digest);
@@ -834,14 +834,7 @@ export function desktopSkills({ home, time = hostTime }) {
           value.installations.some(
             (/** @type {any} */ r) =>
               desiredState(r.resource) === 'ENABLED' &&
-              ['expired', 'revoked', 'superseded', 'failed'].includes(
-                r.state,
-              ) &&
-              rows.some(
-                (row) =>
-                  row.resource.identity.packageId ===
-                  r.resource.identity.packageId,
-              ),
+              ['expired', 'revoked', 'superseded', 'failed'].includes(r.state),
           )
         )
           return false;
@@ -945,7 +938,17 @@ export function desktopSkills({ home, time = hostTime }) {
                     : 'disabled',
             })),
             ...omitted.map((/** @type {any} */ old) => {
-              const inactive = { ...old, state: 'failed' };
+              // Keep the verified bytes addressable for ownership and isolation.
+              // This historical row no longer participates in the activation permit.
+              const inactive = {
+                ...old,
+                state: 'failed',
+                resource: {
+                  ...old.resource,
+                  desiredState: 'DISABLED',
+                  enabled: false,
+                },
+              };
               delete inactive.report;
               return inactive;
             }),
@@ -1043,8 +1046,7 @@ export function desktopSkills({ home, time = hostTime }) {
         );
         const g = state.guardian;
         const enabled = value.installations.filter(
-          (/** @type {any} */ r) =>
-            r.state !== 'failed' && desiredState(r.resource) === 'ENABLED',
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
         );
         if (
           !currentIdentity() ||
@@ -1128,7 +1130,12 @@ export function desktopSkills({ home, time = hostTime }) {
         } else checkTree(active, expected);
         /** @type {[string,any][]} */ const receiptsToCommit = [];
         for (const row of value.installations) {
-          if (row.state === 'failed') continue;
+          if (
+            row.state === 'failed' &&
+            row.resource.identity.kind === 'plugin' &&
+            desiredState(row.resource) === 'DISABLED'
+          )
+            continue;
           if (desiredState(row.resource) === 'ENABLED')
             row.state = 'pending_restart'; // Public host observation, not the permit, decides applied.
           const ref = row.resource,

@@ -384,7 +384,7 @@ export function catalogService(options) {
     }
 
     const candidates = preparationCandidates(rows);
-    if (!candidates.length) return candidates;
+    if (!candidates.length) return { candidates };
     const failedIds = new Set(
       rows
         .filter((row) => row.pluginFailure)
@@ -403,7 +403,8 @@ export function catalogService(options) {
           (row) =>
             row.resource.identity.packageId === old.resource.identity.packageId,
         );
-        if (plugins?.waiting(plugins.read(failure, name), failure)) return [];
+        if (plugins?.waiting(plugins.read(failure, name), failure))
+          return { candidates: [], restartRequired: true };
         api.check();
         const current = await host.observe(name);
         if (current?.enabled) {
@@ -426,9 +427,14 @@ export function catalogService(options) {
           api.check();
           if (stopped.restartRequired) {
             await plugins?.write(failure, name, false, 'disable');
-            return [];
+            return { candidates: [], restartRequired: true };
           }
-          if ((await host.observe(name))?.enabled) return [];
+          if ((await host.observe(name))?.enabled)
+            throw resourceFailure(
+              'resource.apply_failed',
+              'plugin_not_active',
+              'plugin',
+            );
         }
       }
     }
@@ -439,7 +445,7 @@ export function catalogService(options) {
     );
     api.check();
     desktop.prepare(who, candidates, downloads, failedIds);
-    return candidates;
+    return { candidates };
   }
   /** Public host observations, never the selection's 202, determine application.
    * @param {any[]} rows */
@@ -945,7 +951,9 @@ export function catalogService(options) {
               !pendingRestart &&
               desktop?.needsPreparation(who, candidates)
             ) {
-              candidates = await prepareRows(items);
+              const prepared = await prepareRows(items);
+              candidates = prepared.candidates;
+              pendingRestart = prepared.restartRequired === true;
               if (candidates.length) await finish();
             }
             await syncPlugins(items);
@@ -1170,7 +1178,7 @@ export function catalogService(options) {
         )
           refuse('common.conflict');
         try {
-          const candidates = await prepareRows(rows);
+          const { candidates } = await prepareRows(rows);
           const selected = rows.find(
             (item) => item.resource.identity.packageId === input.packageId,
           );

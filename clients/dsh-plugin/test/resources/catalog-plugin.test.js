@@ -250,126 +250,148 @@ test('native disk-full remains visible and is not retried when the failure recor
   assert.equal(installs, 1);
 });
 
-test('a failed update retires only its old local permit when another plugin is removed', async (t) => {
-  const keys = {
-    release: generateKeyPairSync('ed25519'),
-    revocation: generateKeyPairSync('ed25519'),
-    nowMillis: Date.now(),
-  };
-  const broken = catalogFixture(t, undefined, { kind: 'plugin', ...keys });
-  const other = catalogFixture(t, undefined, {
-    ...keys,
-    kind: 'plugin',
-    name: 'another-plugin',
-    packageName: '@example/another-plugin',
-    packageId: '019a0000-0000-7000-8000-000000000192',
-    versionId: '019a0000-0000-7000-8000-000000000194',
-  });
-  const otherName = other.manifest.plugin.packageName;
-  const brokenName = broken.manifest.plugin.packageName;
-  const previous = broken.getRow();
-  broken.desktop.prepare(
-    broken.who,
-    [previous, other.getRow()],
-    [broken, other].map((item) => ({
-      manifest: item.raw,
-      artifacts: [item.archive],
-      revocations: Buffer.from(JSON.stringify(item.revoked)),
-    })),
-  );
-  broken.setRow({
-    ...previous,
-    installationRevision: 2,
-    resource: { ...previous.resource, installationRevision: 2 },
-  });
-  const live = {
-    enabled: true,
-    version: '1.0.0',
-    installed: true,
-    active: true,
-  };
-  const actual = new Map([
-    [brokenName, live],
-    [otherName, live],
-  ]);
-  let removals = 0;
-  let downloadAttempts = 0;
-  const service = catalogService({
-    ...broken,
-    privateSkills: {},
-    host: {},
-    pluginHost: {
-      async observe(name) {
-        return actual.get(name);
+for (const needsRestart of [false, true])
+  test(`a failed update preserves another removal's actual outcome (restart=${needsRestart})`, async (t) => {
+    const keys = {
+      release: generateKeyPairSync('ed25519'),
+      revocation: generateKeyPairSync('ed25519'),
+      nowMillis: Date.now(),
+    };
+    const broken = catalogFixture(t, undefined, { kind: 'plugin', ...keys });
+    const other = catalogFixture(t, undefined, {
+      ...keys,
+      kind: 'plugin',
+      name: 'another-plugin',
+      packageName: '@example/another-plugin',
+      packageId: '019a0000-0000-7000-8000-000000000192',
+      versionId: '019a0000-0000-7000-8000-000000000194',
+    });
+    const otherName = other.manifest.plugin.packageName;
+    const brokenName = broken.manifest.plugin.packageName;
+    const previous = broken.getRow();
+    broken.desktop.prepare(
+      broken.who,
+      [previous, other.getRow()],
+      [broken, other].map((item) => ({
+        manifest: item.raw,
+        artifacts: [item.archive],
+        revocations: Buffer.from(JSON.stringify(item.revoked)),
+      })),
+    );
+    broken.setRow({
+      ...previous,
+      installationRevision: 2,
+      resource: { ...previous.resource, installationRevision: 2 },
+    });
+    const live = {
+      enabled: true,
+      version: '1.0.0',
+      installed: true,
+      active: true,
+    };
+    const actual = new Map([
+      [brokenName, live],
+      [otherName, live],
+    ]);
+    let removals = 0;
+    let retireAttempts = 0;
+    let downloadAttempts = 0;
+    const service = catalogService({
+      ...broken,
+      privateSkills: {},
+      host: {},
+      pluginHost: {
+        async observe(name) {
+          return actual.get(name);
+        },
+        async enable(name, enabled) {
+          assert.equal(enabled, false);
+          assert.ok(actual.has(name));
+          if (name === brokenName) {
+            retireAttempts++;
+            if (needsRestart) return { restartRequired: true };
+          }
+          actual.set(name, { ...actual.get(name), enabled, active: false });
+          return { restartRequired: false };
+        },
+        async remove(name) {
+          assert.equal(name, otherName);
+          actual.delete(name);
+          removals++;
+          return { restartRequired: false };
+        },
       },
-      async enable(name, enabled) {
-        assert.equal(enabled, false);
-        assert.ok(actual.has(name));
-        actual.set(name, { ...actual.get(name), enabled, active: false });
-        return { restartRequired: false };
+      fetchImpl: async (url, options) => {
+        const path = url.pathname.split('/').at(-1);
+        if (path === 'installations' && options.method === 'GET')
+          return Response.json({ items: [broken.getRow(), other.getRow()] });
+        const body = options.body && JSON.parse(options.body);
+        if (path === 'downloads') {
+          downloadAttempts++;
+          return Response.json({ code: 'common.unavailable' }, { status: 503 });
+        }
+        if (
+          body?.selection?.identity.packageId === other.packageId ||
+          body?.identity?.packageId === other.packageId ||
+          url.pathname.includes(other.packageId)
+        )
+          return other.fetchImpl(url, options);
+        return broken.fetchImpl(url, options);
       },
-      async remove(name) {
-        assert.equal(name, otherName);
-        actual.delete(name);
-        removals++;
-        return { restartRequired: false };
-      },
-    },
-    fetchImpl: async (url, options) => {
-      const path = url.pathname.split('/').at(-1);
-      if (path === 'installations' && options.method === 'GET')
-        return Response.json({ items: [broken.getRow(), other.getRow()] });
-      const body = options.body && JSON.parse(options.body);
-      if (path === 'downloads') {
-        downloadAttempts++;
-        return Response.json({ code: 'common.unavailable' }, { status: 503 });
-      }
-      if (
-        body?.selection?.identity.packageId === other.packageId ||
-        body?.identity?.packageId === other.packageId ||
-        url.pathname.includes(other.packageId)
-      )
-        return other.fetchImpl(url, options);
-      return broken.fetchImpl(url, options);
-    },
+    });
+    const brokenResult = await service.list();
+    assert.equal(
+      brokenResult.items.find(
+        (row) => row.resource.identity.packageId === broken.packageId,
+      ).state,
+      'failed',
+    );
+    assert.equal(downloadAttempts, 2);
+    assert.equal(
+      actual.get(brokenName).enabled,
+      true,
+      'keep old selection until a new group is prepared',
+    );
+    const result = await service.apply({
+      packageId: other.packageId,
+      versionId: other.versionId,
+      action: 'remove',
+      revision: 1,
+      key: 'remove-another-plugin',
+    });
+    if (needsRestart) {
+      assert.equal(result.installation.state, 'applying');
+      const pending = await service.list();
+      assert.equal(pending.pendingRestart, true);
+      assert.equal(
+        pending.items.find(
+          (row) => row.resource.identity.packageId === broken.packageId,
+        ).state,
+        'failed',
+      );
+      assert.equal(removals, 0);
+      assert.equal(retireAttempts, 1);
+      return;
+    }
+    assert.equal(result.installation.state, 'removed');
+    assert.equal(other.getRow().state, 'removed');
+    assert.equal(removals, 1);
+    assert.equal(downloadAttempts, 2);
+    assert.equal(actual.get(brokenName).enabled, false);
+    assert.equal(retireAttempts, 1);
+    const ledger = broken.desktop.read(broken.who);
+    const retired = ledger.installations.find(
+      (entry) => entry.resource.identity.packageId === broken.packageId,
+    );
+    assert.equal(retired.state, 'failed');
+    assert.equal(retired.selectionRevision, previous.selectionRevision);
+    assert.equal(retired.generation, previous.generation);
+    assert.deepEqual(JSON.parse(JSON.stringify(retired.resource)), {
+      ...previous.resource,
+      desiredState: 'DISABLED',
+      enabled: false,
+    });
   });
-  const brokenResult = await service.list();
-  assert.equal(
-    brokenResult.items.find(
-      (row) => row.resource.identity.packageId === broken.packageId,
-    ).state,
-    'failed',
-  );
-  assert.equal(downloadAttempts, 2);
-  assert.equal(
-    actual.get(brokenName).enabled,
-    true,
-    'keep old selection until a new group is prepared',
-  );
-  const result = await service.apply({
-    packageId: other.packageId,
-    versionId: other.versionId,
-    action: 'remove',
-    revision: 1,
-    key: 'remove-another-plugin',
-  });
-  assert.equal(result.installation.state, 'removed');
-  assert.equal(other.getRow().state, 'removed');
-  assert.equal(removals, 1);
-  assert.equal(downloadAttempts, 2);
-  assert.equal(actual.get(brokenName).enabled, false);
-  const ledger = broken.desktop.read(broken.who);
-  const retired = ledger.installations.find(
-    (entry) => entry.resource.identity.packageId === broken.packageId,
-  );
-  assert.equal(retired.state, 'failed');
-  assert.equal(retired.selectionRevision, previous.selectionRevision);
-  assert.equal(retired.generation, previous.generation);
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(retired.resource)),
-    previous.resource,
-  );
-});
 
 test('all-disabled native entries never prove the bundle active', async () => {
   const host = resourceHost({
