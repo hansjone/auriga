@@ -257,8 +257,8 @@ export function createTeam({
     onState({ connected: endpointContexts.size > 0 });
     return output.body?.streamId ? value.result : value;
   }
-  /** @param {string} sessionId @param {string} [threadId] @param {AbortSignal} [signal] */
-  async function rememberPrimary(/** @type {string} */ sessionId) {
+  /** @param {string} sessionId */
+  async function rememberPrimary(sessionId) {
     primarySession = sessionId;
     if (vault.snapshot().primarySession === sessionId) return;
     await vault.update((state) => {
@@ -266,6 +266,7 @@ export function createTeam({
       state.primarySession = sessionId;
     });
   }
+  /** @param {string} sessionId @param {string} [threadId] @param {AbortSignal} [signal] */
   async function binding(sessionId, threadId, signal) {
     if (!opaque(sessionId)) throw new Error('real DSH session required');
     const endpointId = await endpoint(sessionId);
