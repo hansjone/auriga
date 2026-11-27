@@ -21,8 +21,8 @@ export function safePath(path) {
       !/[. ]$/.test(part) &&
       !/[\\:<>"|?*]/.test(part) &&
       ![...part].some((c) => {
-        const code = c.codePointAt(0) ?? 0;
-        return code < 32 || (code >= 0x7f && code <= 0x9f) || code > 0xffff;
+        const code = c.charCodeAt(0);
+        return code < 32 || (code >= 0x7f && code <= 0x9f);
       }) &&
       !/^(?:con|prn|aux|nul|conin\$|conout\$|(?:com|lpt)[1-9¹²³])(?:\.|$)/i.test(
         part,

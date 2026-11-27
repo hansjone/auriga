@@ -13,10 +13,13 @@ export const skillRootDependencyFiles = new Set([
 ]);
 
 /** @param {string} part */
-function hasIsoControl(part) {
+function hasDisallowedSkillChar(part) {
   return [...part].some((c) => {
     const code = c.codePointAt(0) ?? 0;
-    return code < 32 || (code >= 0x7f && code <= 0x9f) || code > 0xffff;
+    return !(
+      (code >= 0x20 && code <= 0x7e) ||
+      (code >= 0x4e00 && code <= 0x9fff)
+    );
   });
 }
 
@@ -35,7 +38,7 @@ export function skillDirectoryValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          !hasIsoControl(p) &&
+          !hasDisallowedSkillChar(p) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );
@@ -102,7 +105,7 @@ export function skillPathValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          !hasIsoControl(p) &&
+          !hasDisallowedSkillChar(p) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );

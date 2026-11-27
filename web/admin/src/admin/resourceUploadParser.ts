@@ -93,8 +93,6 @@ function validRange(value: unknown): value is string {
 function safePath(path: string) {
   // eslint-disable-next-line no-control-regex
   const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f-\x9f]/;
-  if ([...path].some((c) => (c.codePointAt(0) ?? 0) > 0xffff))
-    fail('pathUnsafe', path);
   if (
     !path ||
     path.startsWith('/') ||
@@ -227,6 +225,17 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
     );
     safePath(path);
     if (kind === 'plugin' && path !== 'package' && !path.startsWith('package/'))
+      fail('pathUnsafe', path);
+    if (
+      kind === 'skill' &&
+      [...path].some((c) => {
+        const code = c.codePointAt(0) ?? 0;
+        return !(
+          (code >= 0x20 && code <= 0x7e) ||
+          (code >= 0x4e00 && code <= 0x9fff)
+        );
+      })
+    )
       fail('pathUnsafe', path);
     if (
       kind === 'skill' &&
@@ -481,6 +490,16 @@ export async function parseResourceSource(
     for (const e of listed) {
       safePath(e.path);
       if (
+        [...e.path].some((c) => {
+          const code = c.codePointAt(0) ?? 0;
+          return !(
+            (code >= 0x20 && code <= 0x7e) ||
+            (code >= 0x4e00 && code <= 0x9fff)
+          );
+        })
+      )
+        fail('pathUnsafe', e.path);
+      if (
         e.file.size >
         (e.path === 'SKILL.md' || e.path === 'auriga.manifest.json'
           ? 262144
@@ -566,6 +585,16 @@ export async function parseResourceSource(
     skillFiles = [];
     for (const e of entries) {
       safePath(e.path);
+      if (
+        [...e.path].some((c) => {
+          const code = c.codePointAt(0) ?? 0;
+          return !(
+            (code >= 0x20 && code <= 0x7e) ||
+            (code >= 0x4e00 && code <= 0x9fff)
+          );
+        })
+      )
+        fail('pathUnsafe', e.path);
       const key = e.path
         .normalize('NFC')
         .toUpperCase()

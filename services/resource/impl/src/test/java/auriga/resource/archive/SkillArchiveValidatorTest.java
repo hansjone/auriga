@@ -122,13 +122,22 @@ class SkillArchiveValidatorTest {
                 new ByteArrayInputStream(setuidBytes), setuidBytes.length, manifest()));
     var collisionFiles = new LinkedHashMap<String, String>();
     collisionFiles.put("SKILL.md", SKILL_MD);
-    collisionFiles.put("scripts/\u0398.txt", "a\n");
-    collisionFiles.put("scripts/\u03f4.txt", "b\n");
+    collisionFiles.put("scripts/Run.py", "a\n");
+    collisionFiles.put("scripts/run.py", "b\n");
     byte[] collisionBytes = tarGz(collisionFiles);
     assertThrows(
         AurigaException.class,
         () ->
             SkillArchiveValidator.validate(
                 new ByteArrayInputStream(collisionBytes), collisionBytes.length, manifest()));
+    var nonAsciiFiles = new LinkedHashMap<String, String>();
+    nonAsciiFiles.put("SKILL.md", SKILL_MD);
+    nonAsciiFiles.put("scripts/\uA7CE.txt", "a\n");
+    byte[] nonAsciiBytes = tarGz(nonAsciiFiles);
+    assertThrows(
+        AurigaException.class,
+        () ->
+            SkillArchiveValidator.validate(
+                new ByteArrayInputStream(nonAsciiBytes), nonAsciiBytes.length, manifest()));
   }
 }

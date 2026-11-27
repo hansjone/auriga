@@ -73,6 +73,15 @@ public final class SkillArchiveValidator {
     return SkillFileClass.INVALID;
   }
 
+  private static boolean isAllowedSkillPathChars(String path) {
+    for (int i = 0; i < path.length(); ) {
+      int cp = path.codePointAt(i);
+      if (!((cp >= 0x20 && cp <= 0x7e) || (cp >= 0x4e00 && cp <= 0x9fff))) return false;
+      i += Character.charCount(cp);
+    }
+    return true;
+  }
+
   private static boolean isAllowedSkillDirectory(String path) {
     return path.equals("references")
         || path.equals("assets")
@@ -109,7 +118,8 @@ public final class SkillArchiveValidator {
             if (entry.isDirectory() && path.endsWith("/"))
               path = path.substring(0, path.length() - 1);
             CatalogManifest.path(path);
-            if (path.getBytes(StandardCharsets.UTF_8).length > 240
+            if (!isAllowedSkillPathChars(path)
+                || path.getBytes(StandardCharsets.UTF_8).length > 240
                 || path.split("/").length > 8
                 || (entry.getMode() & 07000) != 0
                 || ((entry.getMode() & 0111) != 0 && !entry.isDirectory())) throw invalid();
