@@ -162,10 +162,13 @@ export async function packSkillFolder(files: File[]): Promise<File> {
           /[\\:<>"|?*]/.test(p) ||
           [...p].some((c) => {
             const code = c.codePointAt(0) ?? 0;
-            return !(
-              (code >= 0x20 && code <= 0x7e) ||
-              (code >= 0x4e00 && code <= 0x9fff)
-            );
+            if (path.startsWith('scripts/')) {
+              return !(
+                (code >= 0x20 && code <= 0x7e) ||
+                (code >= 0x4e00 && code <= 0x9fff)
+              );
+            }
+            return code < 32 || (code >= 0x7f && code <= 0x9f);
           }) ||
           /[. ]$/.test(p) ||
           /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p),

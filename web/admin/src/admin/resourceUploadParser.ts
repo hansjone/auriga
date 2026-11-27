@@ -228,6 +228,7 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
       fail('pathUnsafe', path);
     if (
       kind === 'skill' &&
+      (path === 'scripts' || path.startsWith('scripts/')) &&
       [...path].some((c) => {
         const code = c.codePointAt(0) ?? 0;
         return !(
@@ -490,6 +491,7 @@ export async function parseResourceSource(
     for (const e of listed) {
       safePath(e.path);
       if (
+        (e.path === 'scripts' || e.path.startsWith('scripts/')) &&
         [...e.path].some((c) => {
           const code = c.codePointAt(0) ?? 0;
           return !(
@@ -586,6 +588,7 @@ export async function parseResourceSource(
     for (const e of entries) {
       safePath(e.path);
       if (
+        (e.path === 'scripts' || e.path.startsWith('scripts/')) &&
         [...e.path].some((c) => {
           const code = c.codePointAt(0) ?? 0;
           return !(

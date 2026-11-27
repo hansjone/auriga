@@ -11,6 +11,7 @@ const files = {
 test('text-only bundle with scripts and root dependency manifests round trips exact bytes', () => {
   const withScripts = {
     ...files,
+    'references/café.txt': 'Legacy accented filename stays compatible.\n',
     'requirements.txt': 'requests==2.32.3\n',
     'scripts/run.py': 'print("ok")\n',
     'scripts/helper.sh': 'echo ok\n',

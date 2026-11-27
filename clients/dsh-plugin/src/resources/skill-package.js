@@ -12,19 +12,23 @@ export const skillRootDependencyFiles = new Set([
   'poetry.lock',
 ]);
 
-/** @param {string} part */
-function hasDisallowedSkillChar(part) {
+/** @param {string} part @param {boolean} scriptPath */
+function hasDisallowedSkillChar(part, scriptPath) {
   return [...part].some((c) => {
     const code = c.codePointAt(0) ?? 0;
-    return !(
-      (code >= 0x20 && code <= 0x7e) ||
-      (code >= 0x4e00 && code <= 0x9fff)
-    );
+    if (scriptPath) {
+      return !(
+        (code >= 0x20 && code <= 0x7e) ||
+        (code >= 0x4e00 && code <= 0x9fff)
+      );
+    }
+    return code < 32 || (code >= 0x7f && code <= 0x9f);
   });
 }
 
 /** @param {string} path */
 export function skillDirectoryValid(path) {
+  const isScript = path === 'scripts' || path.startsWith('scripts/');
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&
@@ -38,7 +42,7 @@ export function skillDirectoryValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          !hasDisallowedSkillChar(p) &&
+          !hasDisallowedSkillChar(p, isScript) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );
@@ -105,7 +109,7 @@ export function skillPathValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          !hasDisallowedSkillChar(p) &&
+          !hasDisallowedSkillChar(p, path.startsWith('scripts/')) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );

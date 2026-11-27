@@ -147,7 +147,11 @@ func unifiedArchivePath(name string) (string, error) {
 			return "", fmt.Errorf("unsafe skill archive path")
 		}
 		for _, r := range part {
-			if !((r >= 0x20 && r <= 0x7e) || (r >= 0x4e00 && r <= 0x9fff)) {
+			if parts[0] == "scripts" {
+				if (r < 0x20 || r > 0x7e) && (r < 0x4e00 || r > 0x9fff) {
+					return "", fmt.Errorf("unsafe skill archive path")
+				}
+			} else if r < 32 || (r >= 0x7f && r <= 0x9f) {
 				return "", fmt.Errorf("unsafe skill archive path")
 			}
 		}

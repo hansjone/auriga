@@ -118,7 +118,8 @@ public final class SkillArchiveValidator {
             if (entry.isDirectory() && path.endsWith("/"))
               path = path.substring(0, path.length() - 1);
             CatalogManifest.path(path);
-            if (!isAllowedSkillPathChars(path)
+            if (((path.equals("scripts") || path.startsWith("scripts/"))
+                    && !isAllowedSkillPathChars(path))
                 || path.getBytes(StandardCharsets.UTF_8).length > 240
                 || path.split("/").length > 8
                 || (entry.getMode() & 07000) != 0
