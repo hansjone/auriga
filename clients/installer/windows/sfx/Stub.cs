@@ -538,7 +538,8 @@ sealed class Wizard : Form
     readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = W - 72, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = W - 72, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = W - 56, Height = 36, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox recoverPluginsBox = new CheckBox { Left = 44, Top = 202, Width = W - 72, Height = 28, Text = "离线恢复启动（备份并停用业务插件）", Visible = false, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label tasksHint = new Label { Left = 28, Top = 240, Width = W - 56, Height = 44, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     // Ready summary controls
     readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
@@ -622,7 +623,7 @@ sealed class Wizard : Form
         pagePanels[PageWelcome].Controls.Add(MakeVerticalStack(welcomeTitle, welcomeIntro, welcomeHint));
         pagePanels[PageLicense].Controls.AddRange(new Control[] { licenseBox, acceptLicense, declineLicense });
         pagePanels[PageLocation].Controls.AddRange(new Control[] { locationPrompt, folder, browse, spaceInfo, dataHomeInfo });
-        pagePanels[PageTasks].Controls.AddRange(new Control[] { tasksShortcutHeading, desktopLink, startMenuLink, tasksStartupHeading, autostartBox, tasksHint });
+        pagePanels[PageTasks].Controls.AddRange(new Control[] { tasksShortcutHeading, desktopLink, startMenuLink, tasksStartupHeading, autostartBox, recoverPluginsBox, tasksHint });
         pagePanels[PageReady].Controls.AddRange(new Control[] { readyPrompt, summaryBox });
         pagePanels[PageProgress].Controls.AddRange(new Control[] { stepLabel, bar, percentLabel, progressDetail });
         pagePanels[PageFinish].Controls.Add(MakeVerticalStack(finishTitle, finishText, openLog, launch));
@@ -862,6 +863,7 @@ sealed class Wizard : Form
         lines.Add(autostartBox.Checked
             ? "    · 开机时自动启动 " + Setup.Brand
             : "    · 不开启开机自动启动");
+        if (recoverPluginsBox.Checked) lines.Add("    · 备份业务插件并离线恢复启动");
         lines.Add("");
         lines.Add(string.Format("至少需要可用磁盘空间：约 {0:0} MB", Math.Max(1.0, RequiredBytes() / 1048576.0)));
         return string.Join("\r\n", lines.ToArray());
@@ -913,6 +915,10 @@ sealed class Wizard : Form
         {
             Header("选择附加任务", "选择安装 " + Setup.Brand + " 时希望同时执行的附加选项。");
             desktopLink.Enabled = existingRoot == null;
+            recoverPluginsBox.Visible = existingRoot != null;
+            tasksHint.Text = existingRoot != null
+                ? "仅在业务插件配置损坏或无法离线重建时使用恢复。配置、会话和登录状态保留，插件备份存于用户数据目录。"
+                : "以上启动选项在安装完成后可通过系统托盘调整。";
             desktopLink.Text = existingRoot != null ? "桌面快捷方式（升级时沿用现有设置）" : "创建桌面快捷方式(&D)";
             next.Text = "下一步(&N) >";
         }
@@ -1081,6 +1087,7 @@ sealed class Wizard : Form
         bool desktop = desktopLink.Checked;
         bool autostart = autostartBox.Checked;
         bool upgrade = existingRoot != null;
+        bool recoverPlugins = upgrade && recoverPluginsBox.Checked;
         var worker = new Thread(() =>
         {
             int code = 1;
@@ -1110,6 +1117,7 @@ sealed class Wizard : Form
                 string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Setup.Quote(Path.Combine(package, "install.ps1"))
                     + " -InstallDir " + Setup.Quote(root)
                     + " -Progress -MovePayload -CancelFile " + Setup.Quote(cancelFile)
+                    + (recoverPlugins ? " -RecoverPluginProfile" : "")
                     + (desktop || upgrade ? "" : " -NoDesktopShortcut")
                     + (autostart ? " -Autostart" : " -NoAutostart");
                 string lastError = null;

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   PRODUCT,
+  DESKTOP_CORE_DIR,
   computeId,
   PINNED_TREES,
   isPinnedPath,
@@ -40,6 +41,7 @@ export function buildPayload(base, options = {}) {
     nodeContent = 'node-binary',
     coreContent = 'core',
     pnpmVersion = '11.28.5',
+    isolated = false,
   } = options;
   const dir = join(base, `payload-${name}`);
   put(dir, 'upstream/node/node.exe', nodeContent);
@@ -48,7 +50,13 @@ export function buildPayload(base, options = {}) {
     put(dir, 'runtime/python/runtime.json', '{"version":"3.12.14"}');
     put(dir, 'runtime/python/Lib/site-packages/fixture.py', 'pass');
   }
-  put(dir, 'upstream/app/package.json', '{}');
+  put(
+    dir,
+    'upstream/app/package.json',
+    JSON.stringify(
+      isolated ? { dependencies: { 'auriga-dsh': pluginVersion } } : {},
+    ),
+  );
   put(
     dir,
     'upstream/app/package-lock.json',
@@ -74,14 +82,20 @@ export function buildPayload(base, options = {}) {
   put(dir, 'auriga/plugin/auriga-dsh.tgz', `tgz-${name}-${pluginVersion}`);
   put(
     dir,
-    'auriga/plugin/node_modules/auriga-dsh/package.json',
+    (isolated ? DESKTOP_CORE_DIR : 'auriga/plugin/node_modules/auriga-dsh') +
+      '/package.json',
     JSON.stringify({
       name: 'auriga-dsh',
       version: pluginVersion,
       engines: { dsh: enginesDsh },
     }),
   );
-  put(dir, 'auriga/plugin/node_modules/@nats-io/nats-core/package.json', '{}');
+  put(
+    dir,
+    (isolated ? DESKTOP_CORE_DIR : 'auriga/plugin') +
+      '/node_modules/@nats-io/nats-core/package.json',
+    '{}',
+  );
   put(dir, 'auriga/runtime/core.mjs', coreContent);
   put(dir, 'auriga/launcher/auriga-desktop.cmd', `rem ${name}`);
   put(dir, 'auriga/launcher/rollback.cmd', `rem rollback ${name}`);
@@ -120,6 +134,7 @@ export function buildPayload(base, options = {}) {
     },
     plugin: {
       name: 'auriga-dsh',
+      ...(isolated ? { scope: 'installation' } : {}),
       version: pluginVersion,
       enginesDsh,
       tgzSha256: sha256File(join(dir, 'auriga/plugin/auriga-dsh.tgz')),
