@@ -1197,10 +1197,11 @@ export function createSettingsView(
             : (t[/** @type {keyof typeof t} */ (error.message)] ??
               t.unavailable);
     const stateSeqRef = React.useRef(0);
+    const writeInFlightRef = React.useRef(0);
     const readState = async () => {
       const seq = ++stateSeqRef.current;
       const next = await call('auriga/settings/state');
-      if (seq === stateSeqRef.current) {
+      if (writeInFlightRef.current === 0 && seq === stateSeqRef.current) {
         setState(next);
         setAddress(next.platformOrigin ?? '');
       }
@@ -1230,7 +1231,7 @@ export function createSettingsView(
             readError: explain(error),
           }));
           if (!live) return;
-          if (seq === stateSeqRef.current) {
+          if (writeInFlightRef.current === 0 && seq === stateSeqRef.current) {
             setState(next);
             if (first) setAddress(next.platformOrigin ?? '');
           }
@@ -1708,24 +1709,34 @@ export function createSettingsView(
           busy,
           onSave: async (/** @type {any} */ payload) => {
             let ok = false;
-            await run(async () => {
-              const seq = ++stateSeqRef.current;
-              const next = await call('auriga/settings/proxy', payload);
-              if (seq === stateSeqRef.current) setState(next);
-              setNotice(t.saved);
-              ok = true;
-            });
+            writeInFlightRef.current += 1;
+            try {
+              await run(async () => {
+                const next = await call('auriga/settings/proxy', payload);
+                stateSeqRef.current += 1;
+                setState(next);
+                setNotice(t.saved);
+                ok = true;
+              });
+            } finally {
+              writeInFlightRef.current -= 1;
+            }
             return ok;
           },
           onReset: async () => {
             let ok = false;
-            await run(async () => {
-              const seq = ++stateSeqRef.current;
-              const next = await call('auriga/settings/proxy/reset', {});
-              if (seq === stateSeqRef.current) setState(next);
-              setNotice(t.proxyResetDone);
-              ok = true;
-            });
+            writeInFlightRef.current += 1;
+            try {
+              await run(async () => {
+                const next = await call('auriga/settings/proxy/reset', {});
+                stateSeqRef.current += 1;
+                setState(next);
+                setNotice(t.proxyResetDone);
+                ok = true;
+              });
+            } finally {
+              writeInFlightRef.current -= 1;
+            }
             return ok;
           },
           onTest: async (/** @type {string} */ url) => {
