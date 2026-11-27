@@ -690,11 +690,18 @@ export function desktopSkills({ home, time = hostTime }) {
      * @param {any} who @param {any[]} rows */
     awaitingGuardian(who, rows) {
       const value = ledger(who);
-      if (!value || !rows.length || rows.length !== value.installations.length)
-        return false;
+      if (!value || !rows.length) return false;
+      const requested = new Set(rows.map((r) => r.resource.identity.packageId));
+      const applicable = value.installations.filter(
+        (/** @type {any} */ old) =>
+          old.state !== 'failed' ||
+          old.resource.identity.kind !== 'plugin' ||
+          requested.has(old.resource.identity.packageId),
+      );
+      if (rows.length !== applicable.length) return false;
       if (
         !rows.every((r) =>
-          value.installations.some(
+          applicable.some(
             (/** @type {any} */ old) =>
               old.installationRevision === r.installationRevision &&
               old.selectionRevision === r.selectionRevision &&
@@ -732,7 +739,8 @@ export function desktopSkills({ home, time = hostTime }) {
       if (!prepared) return false;
       try {
         for (const r of value.installations.filter(
-          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
+          (/** @type {any} */ r) =>
+            r.state !== 'failed' && desiredState(r.resource) === 'ENABLED',
         )) {
           cached(who, r.resource.identity.manifestDigest);
           for (const a of r.resource.artifacts) cached(who, a.digest);
@@ -826,7 +834,14 @@ export function desktopSkills({ home, time = hostTime }) {
           value.installations.some(
             (/** @type {any} */ r) =>
               desiredState(r.resource) === 'ENABLED' &&
-              ['expired', 'revoked', 'superseded', 'failed'].includes(r.state),
+              ['expired', 'revoked', 'superseded', 'failed'].includes(
+                r.state,
+              ) &&
+              rows.some(
+                (row) =>
+                  row.resource.identity.packageId ===
+                  r.resource.identity.packageId,
+              ),
           )
         )
           return false;
@@ -880,8 +895,8 @@ export function desktopSkills({ home, time = hostTime }) {
       });
     },
     /** All expensive transfer/verification happens before this short lock.
-     * @param {any} who @param {any[]} rows @param {{manifest:Buffer,artifacts:Buffer[],revocations:Buffer}[]} downloads */
-    prepare(who, rows, downloads) {
+     * @param {any} who @param {any[]} rows @param {{manifest:Buffer,artifacts:Buffer[],revocations:Buffer}[]} downloads @param {Set<string>} [retainedPluginIds] */
+    prepare(who, rows, downloads, retainedPluginIds = new Set()) {
       identity(who);
       if (!rows.length || rows.length > 128)
         refuse('resource.storage_unavailable');
@@ -906,21 +921,35 @@ export function desktopSkills({ home, time = hostTime }) {
         if (!previous && existsSync(active) && readdirSync(active).length)
           refuse('resource.state_conflict');
         assertSelectionProgress(previous, rows);
+        const omitted = (previous?.installations ?? []).filter(
+          (/** @type {any} */ row) =>
+            row.resource.identity.kind === 'plugin' &&
+            retainedPluginIds.has(row.resource.identity.packageId),
+        );
+        if (rows.length + omitted.length > 128)
+          refuse('resource.storage_unavailable');
         const value = {
           schemaVersion: 1,
           ...identity(who),
           revision: (previous?.revision ?? 0) + 1,
           selectionRevision: rows[0].selectionRevision,
           generation: rows[0].generation,
-          installations: rows.map((r) => ({
-            ...r,
-            state:
-              desiredState(r.resource) === 'ENABLED'
-                ? 'applying'
-                : desiredState(r.resource) === 'REMOVED'
-                  ? 'removed'
-                  : 'disabled',
-          })),
+          installations: [
+            ...rows.map((r) => ({
+              ...r,
+              state:
+                desiredState(r.resource) === 'ENABLED'
+                  ? 'applying'
+                  : desiredState(r.resource) === 'REMOVED'
+                    ? 'removed'
+                    : 'disabled',
+            })),
+            ...omitted.map((/** @type {any} */ old) => {
+              const inactive = { ...old, state: 'failed' };
+              delete inactive.report;
+              return inactive;
+            }),
+          ],
           processedDisableReceiptIds:
             previous?.processedDisableReceiptIds ?? [],
         };
@@ -1014,7 +1043,8 @@ export function desktopSkills({ home, time = hostTime }) {
         );
         const g = state.guardian;
         const enabled = value.installations.filter(
-          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
+          (/** @type {any} */ r) =>
+            r.state !== 'failed' && desiredState(r.resource) === 'ENABLED',
         );
         if (
           !currentIdentity() ||
@@ -1098,6 +1128,7 @@ export function desktopSkills({ home, time = hostTime }) {
         } else checkTree(active, expected);
         /** @type {[string,any][]} */ const receiptsToCommit = [];
         for (const row of value.installations) {
+          if (row.state === 'failed') continue;
           if (desiredState(row.resource) === 'ENABLED')
             row.state = 'pending_restart'; // Public host observation, not the permit, decides applied.
           const ref = row.resource,

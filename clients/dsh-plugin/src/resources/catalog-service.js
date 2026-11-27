@@ -278,25 +278,8 @@ export function catalogService(options) {
     }
   }
   /** @param {any[]} rows */
-  function preparationCandidates(rows) {
-    const ready = rows.filter((row) => !row.pluginFailure);
-    if (!ready.length || ready.length === rows.length) return ready;
-    const previous = desktop?.read(who)?.installations ?? [];
-    const { selectionRevision, generation } = ready[0];
-    for (const failed of rows.filter((row) => row.pluginFailure)) {
-      const old = previous.find(
-        (/** @type {any} */ item) =>
-          item.resource.identity.packageId ===
-          failed.resource.identity.packageId,
-      );
-      if (old) {
-        const retained = { ...old, selectionRevision, generation };
-        delete retained.report;
-        ready.push(retained);
-      }
-    }
-    return ready;
-  }
+  const preparationCandidates = (rows) =>
+    rows.filter((row) => !row.pluginFailure);
   /** Revalidate and stage the exact current server selection; never resolve latest on retry.
    * @param {any[]} rows */
   async function prepareRows(rows) {
@@ -402,16 +385,52 @@ export function catalogService(options) {
 
     const candidates = preparationCandidates(rows);
     if (!candidates.length) return candidates;
-    for (const candidate of candidates) {
-      if (
-        rows.includes(candidate) ||
-        desiredState(candidate.resource) !== 'ENABLED'
-      )
-        continue;
-      // A failed update can retain the previous bytes, which the guardian will independently verify.
-      const name = desktop.pluginName(who, candidate);
-      if (pluginNames.has(name)) refuse('resource.state_conflict');
-      pluginNames.add(name);
+    const failedIds = new Set(
+      rows
+        .filter((row) => row.pluginFailure)
+        .map((row) => row.resource.identity.packageId),
+    );
+    if (failedIds.size) {
+      const host = options.pluginHost;
+      const previous = desktop.read(who)?.installations ?? [];
+      for (const old of previous.filter((/** @type {any} */ row) =>
+        failedIds.has(row.resource.identity.packageId),
+      )) {
+        if (!host) refuse('resource.apply_failed');
+        const name = desktop.pluginName(who, old);
+        if (pluginNames.has(name)) refuse('resource.state_conflict');
+        const failure = rows.find(
+          (row) =>
+            row.resource.identity.packageId === old.resource.identity.packageId,
+        );
+        if (plugins?.waiting(plugins.read(failure, name), failure)) return [];
+        api.check();
+        const current = await host.observe(name);
+        if (current?.enabled) {
+          const selected = (await api.list()).find(
+            (row) =>
+              row.resource.identity.packageId ===
+              old.resource.identity.packageId,
+          );
+          if (
+            !selected ||
+            selected.installationRevision !== failure.installationRevision ||
+            selected.selectionRevision !== failure.selectionRevision ||
+            selected.generation !== failure.generation ||
+            canonicalize(selected.resource.identity) !==
+              canonicalize(failure.resource.identity)
+          )
+            refuse('common.conflict');
+          api.check();
+          const stopped = await host.enable(name, false);
+          api.check();
+          if (stopped.restartRequired) {
+            await plugins?.write(failure, name, false, 'disable');
+            return [];
+          }
+          if ((await host.observe(name))?.enabled) return [];
+        }
+      }
     }
     api.check();
     desktop?.acceptRevocations(
@@ -419,7 +438,7 @@ export function catalogService(options) {
       downloads.map((d) => d.revocations),
     );
     api.check();
-    desktop.prepare(who, candidates, downloads);
+    desktop.prepare(who, candidates, downloads, failedIds);
     return candidates;
   }
   /** Public host observations, never the selection's 202, determine application.

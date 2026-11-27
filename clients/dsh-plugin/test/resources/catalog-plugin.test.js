@@ -250,7 +250,7 @@ test('native disk-full remains visible and is not retried when the failure recor
   assert.equal(installs, 1);
 });
 
-test('one failed download does not block another signed plugin from being removed', async (t) => {
+test('a failed update retires only its old local permit when another plugin is removed', async (t) => {
   const keys = {
     release: generateKeyPairSync('ed25519'),
     revocation: generateKeyPairSync('ed25519'),
@@ -266,23 +266,32 @@ test('one failed download does not block another signed plugin from being remove
     versionId: '019a0000-0000-7000-8000-000000000194',
   });
   const otherName = other.manifest.plugin.packageName;
+  const brokenName = broken.manifest.plugin.packageName;
+  const previous = broken.getRow();
   broken.desktop.prepare(
     broken.who,
-    [other.getRow()],
-    [
-      {
-        manifest: other.raw,
-        artifacts: [other.archive],
-        revocations: Buffer.from(JSON.stringify(other.revoked)),
-      },
-    ],
+    [previous, other.getRow()],
+    [broken, other].map((item) => ({
+      manifest: item.raw,
+      artifacts: [item.archive],
+      revocations: Buffer.from(JSON.stringify(item.revoked)),
+    })),
   );
-  let actual = {
+  broken.setRow({
+    ...previous,
+    installationRevision: 2,
+    resource: { ...previous.resource, installationRevision: 2 },
+  });
+  const live = {
     enabled: true,
     version: '1.0.0',
     installed: true,
     active: true,
   };
+  const actual = new Map([
+    [brokenName, live],
+    [otherName, live],
+  ]);
   let removals = 0;
   let downloadAttempts = 0;
   const service = catalogService({
@@ -291,17 +300,17 @@ test('one failed download does not block another signed plugin from being remove
     host: {},
     pluginHost: {
       async observe(name) {
-        return name === otherName ? actual : undefined;
+        return actual.get(name);
       },
       async enable(name, enabled) {
-        assert.equal(name, otherName);
         assert.equal(enabled, false);
-        actual = { ...actual, enabled, active: false };
+        assert.ok(actual.has(name));
+        actual.set(name, { ...actual.get(name), enabled, active: false });
         return { restartRequired: false };
       },
       async remove(name) {
         assert.equal(name, otherName);
-        actual = undefined;
+        actual.delete(name);
         removals++;
         return { restartRequired: false };
       },
@@ -332,6 +341,11 @@ test('one failed download does not block another signed plugin from being remove
     'failed',
   );
   assert.equal(downloadAttempts, 2);
+  assert.equal(
+    actual.get(brokenName).enabled,
+    true,
+    'keep old selection until a new group is prepared',
+  );
   const result = await service.apply({
     packageId: other.packageId,
     versionId: other.versionId,
@@ -343,6 +357,18 @@ test('one failed download does not block another signed plugin from being remove
   assert.equal(other.getRow().state, 'removed');
   assert.equal(removals, 1);
   assert.equal(downloadAttempts, 2);
+  assert.equal(actual.get(brokenName).enabled, false);
+  const ledger = broken.desktop.read(broken.who);
+  const retired = ledger.installations.find(
+    (entry) => entry.resource.identity.packageId === broken.packageId,
+  );
+  assert.equal(retired.state, 'failed');
+  assert.equal(retired.selectionRevision, previous.selectionRevision);
+  assert.equal(retired.generation, previous.generation);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(retired.resource)),
+    previous.resource,
+  );
 });
 
 test('all-disabled native entries never prove the bundle active', async () => {
