@@ -558,3 +558,207 @@ test('catalog upload sends fixed multipart and only returns recognized correctio
     undefined,
   );
 });
+
+test('BusinessProxy self-heals expired access token and transient unreachable state on demand', async (t) => {
+  const f = fixture();
+  await login(f);
+  let refreshes = 0;
+  const originalRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => {
+    refreshes++;
+    return originalRefresh(...args);
+  };
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  // Simulate access token expiry while refresh_token is still valid.
+  f.broker.tokenUntil = f.broker.now() - 1000;
+  f.broker.tokenMonoUntil = f.broker.mono() - 1000;
+  assert.equal(f.broker.snapshot().state, 'reauth_required');
+  const healed = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(healed.output, healed.error?.code);
+  assert.equal(refreshes, 1);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+
+  // Simulate transient unreachable state recovering on demand.
+  f.broker.transition('unreachable', 'offline');
+  assert.equal(f.broker.snapshot().state, 'unreachable');
+  const recovered = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(recovered.output, recovered.error?.code);
+  assert.equal(refreshes, 2);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+});
+
+test('BusinessProxy transparently refreshes and replays safe upstream 401 calls but never replays non-idempotent POST', async (t) => {
+  const f = fixture();
+  await login(f);
+  f.platform.audience = async () => f.tokens;
+  let refreshes = 0;
+  const originalRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => {
+    refreshes++;
+    return {
+      ...(await originalRefresh(...args)),
+      access_token: 'refreshed-access-' + refreshes,
+    };
+  };
+  const seenAuth = [];
+  let getAttempts = 0;
+  let postNoIdemAttempts = 0;
+  const proxy = new BusinessProxy(f.broker, async (url, options) => {
+    seenAuth.push(options.headers.Authorization ?? options.headers.authorization);
+    if (options.method === 'GET') {
+      getAttempts++;
+      if (getAttempts === 1) {
+        return new Response(
+          JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return Response.json({ items: [] });
+    }
+    postNoIdemAttempts++;
+    return new Response(
+      JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  const getRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.ok(getRes.output, getRes.error?.code);
+  assert.equal(getAttempts, 2);
+  assert.equal(refreshes, 1);
+  assert.notEqual(seenAuth[0], seenAuth[1]);
+
+  // Non-idempotent POST without idempotency-key must NOT replay on 401.
+  const postRes = await proxy.call(
+    call(f.broker, 'createAiChatCompletion', {
+      body: {
+        model: 'test',
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+    }),
+    OWNER,
+  );
+  assert.equal(postRes.error?.code, 'common.unauthenticated');
+  assert.equal(postNoIdemAttempts, 1);
+});
+
+test('in-flight business call survives transient unreachable but aborts on explicit logout', async (t) => {
+  const f = fixture();
+  await login(f);
+  let releaseFirst;
+  let secondAborted = false;
+  let callIndex = 0;
+  const proxy = new BusinessProxy(f.broker, async (_url, options) => {
+    const idx = ++callIndex;
+    if (idx === 1) {
+      await new Promise((resolve, reject) => {
+        releaseFirst = resolve;
+        options.signal.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        );
+      });
+      return Response.json({ items: [] });
+    }
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        secondAborted = true;
+        reject(new Error('aborted'));
+      });
+    });
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  const projection = structuredClone(f.broker.projection);
+  const first = proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  // Transient unreachable + recovery should NOT abort the in-flight call.
+  f.broker.transition('unreachable', 'offline');
+  f.broker.transition('authenticated', undefined, projection);
+  releaseFirst();
+  const firstRes = await first;
+  assert.ok(firstRes.output, firstRes.error?.code);
+
+  // Explicit logout MUST abort an in-flight call immediately.
+  const second = proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  await f.broker.logout();
+  const secondRes = await second;
+  assert.equal(secondAborted, true);
+  assert.ok(
+    ['common.unauthenticated', 'common.unavailable'].includes(
+      secondRes.error?.code,
+    ),
+  );
+});
+
+test('BusinessProxy distinguishes network unavailable from revoked credentials during self-heal', async (t) => {
+  const f = fixture();
+  await login(f);
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // Network outage during refresh -> common.unavailable (not unauthenticated).
+  f.platform.refresh = async () => {
+    throw Object.assign(new Error('connect ECONNREFUSED'), { status: 503 });
+  };
+  f.broker.transition('unreachable', 'offline');
+  const offlineRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    OWNER,
+  );
+  assert.equal(offlineRes.error?.code, 'common.unavailable');
+
+  // Real remote revocation (401) -> common.unauthenticated and broker enters revoked.
+  f.platform.refresh = async () => {
+    throw Object.assign(new Error('revoked'), {
+      status: 401,
+      code: 'iam.invalid_token',
+    });
+  };
+  const revokedRes = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    OWNER,
+  );
+  assert.equal(revokedRes.error?.code, 'common.unauthenticated');
+  assert.equal(f.broker.snapshot().state, 'revoked');
+});

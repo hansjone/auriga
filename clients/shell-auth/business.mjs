@@ -78,7 +78,7 @@ export class BusinessProxy {
     this.changed = () => {
       for (const c of this.controllers) c.abort();
     };
-    broker.on('changed', this.changed);
+    broker.on('identity_invalidated', this.changed);
   }
   async call(message, owner) {
     requireValid('ShellAuthBusinessCall', message);
@@ -134,7 +134,26 @@ export class BusinessProxy {
     try {
       context = this.broker.guard(message.shellEpoch, message.expectedRevision);
     } catch (e) {
-      return response({ error: error(e.code ?? 'common.unauthenticated') });
+      if (
+        e.code === 'common.unauthenticated' &&
+        message.shellEpoch === this.broker.epoch &&
+        this.broker.canSelfHeal()
+      ) {
+        try {
+          context = await this.broker.ensureAuthenticated({
+            timeoutMs: Math.min(remaining, 10000),
+          });
+        } catch (healError) {
+          return response({
+            error: error(
+              healError.code ?? 'common.unauthenticated',
+              healError.code === 'common.unavailable',
+            ),
+          });
+        }
+      } else {
+        return response({ error: error(e.code ?? 'common.unauthenticated') });
+      }
     }
     const result = this.execute(definition, input, context, remaining, owner)
       .then((output) => response({ output }))
@@ -245,17 +264,18 @@ export class BusinessProxy {
         });
       headers[key] = value;
     }
+    let activeContext = context;
     const isTeam =
       definition.route === '/ai/mcp' ||
       definition.route.startsWith('/ai/team/node/');
-    const token = isTeam
+    let token = isTeam
       ? undefined
       : await this.broker.tokenFor(
           definition.audience,
-          context,
+          activeContext,
           definition.operation,
         );
-    this.broker.assert(context);
+    this.broker.assert(activeContext, { allowRevisionAdvance: true });
     const controller = new AbortController();
     this.controllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), remaining);
@@ -268,7 +288,7 @@ export class BusinessProxy {
         return await this.team.execute(
           definition,
           input,
-          context,
+          activeContext,
           owner,
           controller.signal,
         );
@@ -291,11 +311,11 @@ export class BusinessProxy {
         input.body !== undefined ? JSON.stringify(input.body) : undefined;
       let contentType =
         input.body !== undefined ? 'application/json' : undefined;
-      if (
-        ['UnifiedUploadResourceVersion', 'uploadResourceVersion'].includes(
-          definition.operation,
-        )
-      ) {
+      const isMultipartUpload = [
+        'UnifiedUploadResourceVersion',
+        'uploadResourceVersion',
+      ].includes(definition.operation);
+      if (isMultipartUpload) {
         const form = new FormData();
         for (const [key, value] of Object.entries(input.body)) {
           if (key === 'metadata') {
@@ -306,7 +326,7 @@ export class BusinessProxy {
             continue;
           }
           for (const reference of Array.isArray(value) ? value : [value]) {
-            const upload = this.streams.consume(reference, context, owner);
+            const upload = this.streams.consume(reference, activeContext, owner);
             form.append(
               key,
               new Blob([upload.bytes], { type: upload.mediaType }),
@@ -317,18 +337,54 @@ export class BusinessProxy {
         requestBody = form;
         contentType = undefined;
       }
-      const response = await this.fetcher(url.href, {
-        method,
-        redirect: 'error',
-        credentials: 'omit',
-        signal: controller.signal,
-        headers: {
-          ...headers,
-          Authorization: `Bearer ${token}`,
-          ...(contentType ? { 'Content-Type': contentType } : {}),
-        },
-        ...(requestBody !== undefined ? { body: requestBody } : {}),
-      });
+      const sendFetch = (bearer) =>
+        this.fetcher(url.href, {
+          method,
+          redirect: 'error',
+          credentials: 'omit',
+          signal: controller.signal,
+          headers: {
+            ...headers,
+            Authorization: `Bearer ${bearer}`,
+            ...(contentType ? { 'Content-Type': contentType } : {}),
+          },
+          ...(requestBody !== undefined ? { body: requestBody } : {}),
+        });
+      let response = await sendFetch(token);
+      const canReplayOn401 =
+        !isMultipartUpload &&
+        (method === 'GET' ||
+          method === 'HEAD' ||
+          Boolean(headers['idempotency-key'] || headers['Idempotency-Key']));
+      if (
+        response.status === 401 &&
+        canReplayOn401 &&
+        this.broker.canSelfHeal()
+      ) {
+        await response.body?.cancel?.().catch(() => {});
+        try {
+          activeContext = await this.broker.ensureAuthenticated({
+            forceRefresh: true,
+            timeoutMs: Math.min(remaining, 8000),
+          });
+          this.broker.assert(activeContext, { allowRevisionAdvance: true });
+          token = await this.broker.tokenFor(
+            definition.audience,
+            activeContext,
+            definition.operation,
+          );
+          this.broker.assert(activeContext, { allowRevisionAdvance: true });
+          response = await sendFetch(token);
+        } catch (healError) {
+          if (healError?.code === 'common.unavailable')
+            throw Object.assign(new Error('common.unavailable'), {
+              code: 'common.unavailable',
+            });
+          throw Object.assign(new Error('common.unauthenticated'), {
+            code: 'common.unauthenticated',
+          });
+        }
+      }
       if (
         definition.operation === 'createAiChatCompletionStream' &&
         response.ok
@@ -373,7 +429,7 @@ export class BusinessProxy {
         'createMemberResourceDownloadTicket',
       ].includes(definition.operation);
       const raw = await boundedBody(response, ticketWire ? 65536 : undefined);
-      this.broker.assert(context);
+      this.broker.assert(activeContext, { allowRevisionAdvance: true });
       let body;
       try {
         body =
@@ -493,7 +549,7 @@ export class BusinessProxy {
     this.team.close();
     this.streams.close();
     this.changed();
-    this.broker.off('changed', this.changed);
+    this.broker.off('identity_invalidated', this.changed);
     this.requests.clear();
   }
   async pumpSse(stream, reader) {

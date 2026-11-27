@@ -68,7 +68,8 @@ function text(value, max = 4096) {
 
 const hints = {
   'common.validation_failed': '检查目录、参数和清单后重新预检。',
-  'common.unauthenticated': '请用户在桌面 Auriga 重新登录，再预检。',
+  'common.unauthenticated':
+    '平台登录已失效，请在桌面 Auriga 重新扫码登录，再预检。',
   'common.forbidden':
     '请检查租户成员身份及目标资源归属，并在桌面主会话中操作。',
   'common.not_found': '检查目标资源 ID，或在当前会话重新预检取得有效句柄。',
@@ -76,7 +77,8 @@ const hints = {
   'common.precondition_failed':
     '目标资源有并发更新，确认最新状态后用原参数重试。',
   'common.rate_limited': '等待当前工作结束或旧句柄到期后重试。',
-  'common.unavailable': '待连接恢复后重试。重试送审时使用原句柄和参数。',
+  'common.unavailable':
+    '平台连接暂时不可达（系统正在自动重连，无需重新扫码），待连接恢复后用原句柄和参数重试。',
   'resource.digest_mismatch': '检查源文件并重新预检，随后提交新的句柄。',
   'resource.storage_unavailable': '等待当前账号资源状态恢复，随后重试。',
 };

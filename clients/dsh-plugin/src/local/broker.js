@@ -17,6 +17,7 @@ export async function createBroker({
   signal,
   stateFactory,
   checkBusinessAccess,
+  authWaitMs = 8000,
 }) {
   /** @type {any} */ let receiver;
   /** @type {any} */ let disconnected;
@@ -89,9 +90,18 @@ export async function createBroker({
         },
       }
     : undefined;
+  /** @type {Set<(snapshot:any)=>void>} */ const changeListeners = new Set();
+  const handleStateChange = (/** @type {any} */ next) => {
+    for (const listener of [...changeListeners]) listener(next);
+    onChange?.(next);
+  };
   const state = stateFactory
-    ? stateFactory({ onInvalidate, onChange })
-    : createShellState({ transport, onInvalidate, onChange });
+    ? stateFactory({ onInvalidate, onChange: handleStateChange })
+    : createShellState({
+        transport,
+        onInvalidate,
+        onChange: handleStateChange,
+      });
   const stop = () => {
     closed = true;
     shutdown.abort();
@@ -99,23 +109,65 @@ export async function createBroker({
   };
   signal?.addEventListener('abort', stop, { once: true });
   if (signal?.aborted) stop();
+  const sameAuthenticatedIdentity = (
+    /** @type {any} */ a,
+    /** @type {any} */ b,
+  ) =>
+    a?.state === 'authenticated' &&
+    b?.state === 'authenticated' &&
+    a.shellEpoch === b.shellEpoch &&
+    a.identity?.tenantId === b.identity?.tenantId &&
+    a.identity?.memberId === b.identity?.memberId &&
+    a.identity?.deviceId === b.identity?.deviceId &&
+    a.identity?.providerId === b.identity?.providerId &&
+    a.identity?.uacSessionBinding?.sourceSessionId ===
+      b.identity?.uacSessionBinding?.sourceSessionId &&
+    a.identity?.uacSessionBinding?.authGeneration ===
+      b.identity?.uacSessionBinding?.authGeneration;
   // Stop consumers immediately on shell invalidation even when the IPC producer
   // never settles. The producer still owns cancellation of its remote work.
-  async function pending(/** @type {()=>Promise<any>} */ work) {
+  async function pending(
+    /** @type {()=>Promise<any>} */ work,
+    { allowRevisionAdvance = false } = {},
+  ) {
+    const snapBefore = state.current();
     const check = state.fence();
+    const verify = () => {
+      try {
+        check();
+      } catch (error) {
+        if (
+          allowRevisionAdvance &&
+          sameAuthenticatedIdentity(snapBefore, state.current())
+        )
+          return;
+        throw error;
+      }
+    };
     let off = () => {};
+    /** @type {(next:any)=>void} */ let onStateChange = () => {};
     /** @type {ReturnType<typeof setTimeout>|undefined} */ let timer;
     try {
       return await new Promise((resolve, reject) => {
-        off = state.subscribeInvalidation(() =>
-          reject(unavailable('common.unauthenticated')),
-        );
+        onStateChange = (next) => {
+          if (
+            allowRevisionAdvance &&
+            !sameAuthenticatedIdentity(snapBefore, next)
+          ) {
+            reject(unavailable('common.unauthenticated'));
+          }
+        };
+        if (allowRevisionAdvance) changeListeners.add(onStateChange);
+        off = state.subscribeInvalidation(() => {
+          if (allowRevisionAdvance && state.current()) return;
+          reject(unavailable('common.unauthenticated'));
+        });
         timer = setTimeout(() => reject(unavailable()), 30000);
         timer.unref();
-        check();
+        verify();
         Promise.resolve(work()).then((result) => {
           try {
-            check();
+            verify();
             resolve(result);
           } catch (error) {
             reject(error);
@@ -123,15 +175,68 @@ export async function createBroker({
         }, reject);
       });
     } finally {
+      changeListeners.delete(onStateChange);
       off();
       clearTimeout(timer);
     }
+  }
+  async function waitForAuthenticated(timeoutMs = authWaitMs) {
+    if (closed) throw unavailable('common.unauthenticated');
+    const initial = state.current();
+    if (initial?.state === 'authenticated') return;
+    if (
+      !initial ||
+      !['unreachable', 'authenticating'].includes(initial.state)
+    ) {
+      throw unavailable('common.unauthenticated');
+    }
+    await new Promise((resolve, reject) => {
+      let done = false;
+      /** @type {ReturnType<typeof setTimeout>|undefined} */ let timer;
+      const finish = (/** @type {() => void} */ fn) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        changeListeners.delete(check);
+        offInvalidation();
+        fn();
+      };
+      const check = () => {
+        if (closed)
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        const cur = state.current();
+        if (cur?.state === 'authenticated')
+          return finish(() => resolve(undefined));
+        if (!cur || !['unreachable', 'authenticating'].includes(cur.state)) {
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        }
+      };
+      changeListeners.add(check);
+      const offInvalidation = state.subscribeInvalidation(check);
+      timer = setTimeout(() => {
+        const cur = state.current();
+        finish(() =>
+          reject(
+            unavailable(
+              cur?.state === 'unreachable'
+                ? 'common.unavailable'
+                : 'common.unauthenticated',
+            ),
+          ),
+        );
+      }, timeoutMs);
+      check();
+    });
   }
   const envelope = (requireAccess = true) => {
     if (requireAccess) checkBusinessAccess?.();
     const s = state.current();
     if (s?.state !== 'authenticated' || closed)
-      throw unavailable('common.unauthenticated');
+      throw unavailable(
+        s?.state === 'unreachable'
+          ? 'common.unavailable'
+          : 'common.unauthenticated',
+      );
     return {
       protocolVersion: 1,
       requestId: randomUUID(),
@@ -203,24 +308,56 @@ export async function createBroker({
         throw unavailable('common.conflict');
     },
     async call(/** @type {string} */ operation, /** @type {any} */ input) {
-      const check = state.fence(),
-        command = { ...envelope(), call: { operation, input } };
-      validate('ShellAuthBusinessCall', command);
-      const result = await pending(() => ipc.call(command));
-      check();
-      validate('ShellAuthBusinessResult', result);
-      if (
-        result.requestId !== command.requestId ||
-        result.operation !== operation
-      )
-        throw unavailable('common.conflict');
-      if (result.error)
-        throw Object.assign(unavailable(result.error.code), {
-          status: result.error.upstreamStatus,
-          retryable: result.error.retryable,
-          ...(result.error.rule ? { rule: result.error.rule } : {}),
+      await waitForAuthenticated();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const snapBefore = state.current();
+        const check = state.fence(),
+          command = { ...envelope(), call: { operation, input } };
+        validate('ShellAuthBusinessCall', command);
+        const result = await pending(() => ipc.call(command), {
+          allowRevisionAdvance: true,
         });
-      return result.output;
+        validate('ShellAuthBusinessResult', result);
+        if (
+          result.requestId !== command.requestId ||
+          result.operation !== operation
+        )
+          throw unavailable('common.conflict');
+        if (
+          attempt === 0 &&
+          result.error?.code === 'common.conflict' &&
+          snapBefore?.shellEpoch
+        ) {
+          let snapAfter = state.current();
+          if (
+            snapAfter?.shellEpoch === snapBefore.shellEpoch &&
+            snapAfter.revision === snapBefore.revision
+          ) {
+            await state.connect().catch(() => {});
+            snapAfter = state.current();
+          }
+          if (
+            sameAuthenticatedIdentity(snapBefore, snapAfter) &&
+            snapAfter.revision !== snapBefore.revision
+          ) {
+            continue;
+          }
+        }
+        try {
+          check();
+        } catch (error) {
+          if (!sameAuthenticatedIdentity(snapBefore, state.current()))
+            throw error;
+        }
+        if (result.error)
+          throw Object.assign(unavailable(result.error.code), {
+            status: result.error.upstreamStatus,
+            retryable: result.error.retryable,
+            ...(result.error.rule ? { rule: result.error.rule } : {}),
+          });
+        return result.output;
+      }
+      throw unavailable('common.conflict');
     },
     async register(/** @type {any} */ context) {
       const result = await host(

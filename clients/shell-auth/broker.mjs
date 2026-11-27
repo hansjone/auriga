@@ -140,7 +140,30 @@ export class Broker extends EventEmitter {
     await this.drainRevocations();
     return this;
   }
+  identityKey(projection = this.projection) {
+    const id = projection?.identity;
+    if (!id) return '';
+    return JSON.stringify([
+      id.tenantId,
+      id.memberId,
+      id.deviceId,
+      id.providerId,
+      id.uacSessionBinding?.sourceSessionId ?? null,
+      id.uacSessionBinding?.authGeneration ?? null,
+    ]);
+  }
+  canSelfHeal() {
+    if (this.closed) return false;
+    if (this.record.tokens && !this.record.manualLoginRequired) return true;
+    return Boolean(
+      this.localSource &&
+        this.liveLocalSource(this.localSource.owner) &&
+        !this.record.manualLoginRequired,
+    );
+  }
   transition(state, reason, projection) {
+    const previousIdentityKey = this.identityKey(this.projection);
+    const nextIdentityKey = this.identityKey(projection);
     const identity = projection?.identity ?? this.projection?.identity;
     if (state === 'authenticating' || !reason) this.loginError = undefined;
     this.state = state;
@@ -160,6 +183,13 @@ export class Broker extends EventEmitter {
       correlationId: randomUUID(),
       revision: this.revision,
     });
+    const invalidated =
+      ['signed_out', 'revoked'].includes(state) ||
+      (state === 'reauth_required' && !this.canSelfHeal()) ||
+      (previousIdentityKey &&
+        nextIdentityKey &&
+        previousIdentityKey !== nextIdentityKey);
+    if (invalidated) this.emit('identity_invalidated', snapshot);
     this.emit('changed', snapshot);
   }
   snapshot(pageOwner) {
@@ -224,7 +254,20 @@ export class Broker extends EventEmitter {
       identity: this.projection.identity,
     };
   }
-  assert(context) {
+  assert(context, { allowRevisionAdvance = false } = {}) {
+    if (allowRevisionAdvance) {
+      if (this.closed || this.snapshot().state !== 'authenticated')
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      if (
+        context.epoch !== this.epoch ||
+        context.generation !== this.generation ||
+        this.identityKey() !== this.identityKey({ identity: context.identity })
+      )
+        throw conflict();
+      return;
+    }
     this.guard(context.epoch, context.revision);
     if (context.generation !== this.generation) throw conflict();
   }
@@ -929,16 +972,65 @@ export class Broker extends EventEmitter {
     this.tokenUntil = verified.tokenUntil;
     this.sourceUntil = verified.sourceUntil;
     this.tokenMonoUntil = verified.tokenMonoUntil;
+    this.tokenLifetimeMs = Math.max(0, verified.tokenUntil - this.now());
   }
-  check() {
-    if (this.checking) return this.checking;
-    this.health = this.health.catch(() => {}).then(() => this.checkOnce());
+  check(forceRefresh = false) {
+    if (this.checking) {
+      if (forceRefresh && !this.checkingForce) {
+        return this.checking.finally(() => {}).then(() => this.check(true));
+      }
+      return this.checking;
+    }
+    this.checkingForce = forceRefresh;
+    this.health = this.health
+      .catch(() => {})
+      .then(() => this.checkOnce(forceRefresh));
     this.checking = this.health.finally(() => {
       this.checking = undefined;
+      this.checkingForce = false;
     });
     return this.checking;
   }
-  async checkOnce() {
+  async ensureAuthenticated({ forceRefresh = false, timeoutMs = 8000 } = {}) {
+    if (this.closed)
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    const currentState = this.snapshot().state;
+    const nearExpiry =
+      !Number.isFinite(this.tokenUntil) ||
+      this.tokenUntil - this.now() < 5000 ||
+      this.mono() >= this.tokenMonoUntil - 5000;
+    if (!forceRefresh && currentState === 'authenticated' && !nearExpiry) {
+      return this.guard();
+    }
+    if (!this.canSelfHeal()) {
+      if (currentState === 'unreachable') throw unavailable();
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    }
+    const deadline = this.mono() + Math.max(1000, timeoutMs);
+    let timer;
+    try {
+      await Promise.race([
+        this.check(forceRefresh),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(unavailable()), Math.max(1000, deadline - this.mono()));
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    const after = this.snapshot().state;
+    if (after === 'authenticated') return this.guard();
+    if (after === 'unreachable') throw unavailable();
+    throw Object.assign(new Error('common.unauthenticated'), {
+      code: 'common.unauthenticated',
+    });
+  }
+  async checkOnce(forceRefresh = false) {
     if (this.closed) return;
     if (this.localSource && this.localSource.until <= this.mono())
       await this.clearLocalUac(this.localSource.owner);
@@ -951,10 +1043,17 @@ export class Broker extends EventEmitter {
       old = this.record.tokens;
     let next;
     try {
+      const refreshMargin = Math.max(
+        60000,
+        Math.min(300000, Math.floor((this.tokenLifetimeMs ?? 0) * 0.2)),
+      );
       const refresh =
+        forceRefresh ||
         !this.claims ||
-        this.tokenUntil - this.now() < 60000 ||
-        this.state === 'unreachable';
+        this.tokenUntil - this.now() < refreshMargin ||
+        this.mono() >= this.tokenMonoUntil - refreshMargin ||
+        this.state === 'unreachable' ||
+        this.state === 'reauth_required';
       next = refresh
         ? await this.platform.refresh(old.refresh_token, old.client_id)
         : old;

@@ -306,3 +306,63 @@ test('a pre-invalidated shell cannot start a platform call', async (t) => {
   });
   assert.equal(connection.calls.length, before);
 });
+
+test('broker.call waits for transient unreachable state to recover to authenticated', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  connection.transition('unreachable');
+  const pending = runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('authenticated');
+  const output = await pending;
+  assert.equal(output.statusCode, 200);
+});
+
+test('broker.call returns common.unavailable when unreachable does not recover before timeout', async (t) => {
+  const { createBroker } = await import('../src/local/broker.js');
+  const connection = brokerFixture();
+  const broker = await createBroker({
+    ipc: connection.ipc,
+    validate: connection.validate,
+    authWaitMs: 60,
+  });
+  t.after(() => broker.close());
+  connection.transition('unreachable');
+  await assert.rejects(
+    broker.call('UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    {
+      code: 'common.unavailable',
+    },
+  );
+});
+
+test('broker.call retries once when same-identity revision advances and causes common.conflict', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  const origCall = connection.ipc.call;
+  let attempts = 0;
+  connection.ipc.call = async (message) => {
+    if (message.call?.operation === 'UnifiedListResourcePackages') {
+      attempts++;
+      if (attempts === 1) {
+        connection.transition('authenticated');
+        return {
+          requestId: message.requestId,
+          operation: 'UnifiedListResourcePackages',
+          error: {
+            code: 'common.conflict',
+            retryable: true,
+          },
+        };
+      }
+    }
+    return origCall(message);
+  };
+  const output = await runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  assert.equal(output.statusCode, 200);
+  assert.equal(attempts, 2);
+});
