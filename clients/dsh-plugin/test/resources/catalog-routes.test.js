@@ -141,8 +141,14 @@ test('catalog readers allow plugin/skill with native access token, rejecting arb
 test('desktop catalog requests are fenced to the current native owner', async (t) => {
   const f = catalogFixture(t);
   let calls = 0;
+  const operation = {
+    packageId: f.packageId,
+    versionId: f.versionId,
+    phase: 'installing_dependencies',
+  };
   const route = catalogRoutes({
     ...f,
+    service: () => ({ pluginOperation: () => operation }),
     fetchImpl: async () => {
       calls++;
       return Response.json({ items: [] });
@@ -162,6 +168,18 @@ test('desktop catalog requests are fenced to the current native owner', async (t
       res,
     );
     assert.equal(res.status, status);
+    const progress = response();
+    await route(
+      {
+        method: 'GET',
+        url: '/auriga/resources/catalog/plugin-progress',
+        headers: { 'x-auriga-catalog-owner': owner },
+      },
+      progress,
+    );
+    assert.equal(progress.status, status);
+    if (status === 200)
+      assert.deepEqual(JSON.parse(progress.body), { operation });
   }
   assert.equal(calls, 1);
 });

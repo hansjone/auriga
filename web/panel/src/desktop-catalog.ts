@@ -16,6 +16,7 @@ import type {
 type HostFetch = NonNullable<PanelContext['fetch']>;
 type CatalogScope = NonNullable<PanelContext['catalogSession']>;
 type Kind = 'plugin' | 'skill';
+type Action = { packageId: string; versionId: string; revision: number };
 type PluginOperation = {
   packageId: string;
   versionId: string;
@@ -162,6 +163,7 @@ export class DesktopCatalog {
   private progressPoll = false;
   private installationPoll = false;
   private pollUntil = 0;
+  private pendingPlugin?: Action;
   constructor(
     private fetch: HostFetch,
     private scope: CatalogScope,
@@ -175,6 +177,7 @@ export class DesktopCatalog {
     this.lifetime.abort();
     clearTimeout(this.progressTimer);
     this.pluginOperation = undefined;
+    this.pendingPlugin = undefined;
     this.snapshot = undefined;
     this.versions.clear();
     this.emit();
@@ -188,6 +191,7 @@ export class DesktopCatalog {
     this.progressTimer = undefined;
     this.pollUntil = 0;
     this.pluginOperation = undefined;
+    this.pendingPlugin = undefined;
     this.snapshot = undefined;
     this.versions.clear();
     this.error = error;
@@ -205,14 +209,39 @@ export class DesktopCatalog {
     );
   }
 
+  isTrackingPlugin(packageId: string) {
+    return this.pendingPlugin?.packageId === packageId;
+  }
+
+  get checkingPluginSelection() {
+    return !!this.pendingPlugin && !this.mutating;
+  }
+
+  private get trackingPlugin() {
+    return this.pendingPlugin || this.waitingForPlugin || this.pluginOperation;
+  }
+
+  private readPluginSelection(installations: InstallationSnapshot) {
+    const selection = this.pendingPlugin;
+    if (
+      selection &&
+      installations.items.some(
+        (row) =>
+          row.resource.identity.packageId === selection.packageId &&
+          row.resource.identity.versionId === selection.versionId &&
+          row.installationRevision > selection.revision,
+      )
+    )
+      this.pendingPlugin = undefined;
+  }
+
   private schedulePluginPoll() {
     const signal = this.lifetime.signal;
     if (
       this.progressTimer ||
       this.progressPoll ||
       signal.aborted ||
-      Date.now() >= this.pollUntil ||
-      (!this.mutating && !this.waitingForPlugin)
+      !this.trackingPlugin
     )
       return;
     this.progressTimer = setTimeout(() => {
@@ -222,12 +251,13 @@ export class DesktopCatalog {
   }
 
   private async pollPlugins(signal: AbortSignal) {
-    if (
-      signal.aborted ||
-      Date.now() >= this.pollUntil ||
-      (!this.mutating && !this.waitingForPlugin)
-    )
+    if (signal.aborted || !this.trackingPlugin) return;
+    if (Date.now() >= this.pollUntil) {
+      this.pendingPlugin = undefined;
+      this.pluginOperation = undefined;
+      this.emit();
       return;
+    }
     this.progressPoll = true;
     try {
       const { operation } = await this.get('plugin-progress', signal).catch(
@@ -237,12 +267,21 @@ export class DesktopCatalog {
         },
       );
       if (signal.aborted) return;
+      const previousOperation = this.pluginOperation;
       this.pluginOperation = operation ?? undefined;
-      this.emit();
+      if (operation) this.pollUntil = Date.now() + 300000;
+      if (
+        previousOperation?.packageId !== operation?.packageId ||
+        previousOperation?.versionId !== operation?.versionId ||
+        previousOperation?.phase !== operation?.phase ||
+        previousOperation?.attempt?.index !== operation?.attempt?.index ||
+        previousOperation?.attempt?.total !== operation?.attempt?.total
+      )
+        this.emit();
       if (
         !operation &&
         !this.mutating &&
-        this.waitingForPlugin &&
+        (this.pendingPlugin || this.waitingForPlugin) &&
         !this.installationPoll
       ) {
         const before = this.snapshot;
@@ -262,8 +301,16 @@ export class DesktopCatalog {
               !this.loading &&
               !this.mutating
             ) {
-              this.snapshot = { ...this.snapshot, installations };
-              this.emit();
+              const wasChecking = !!this.pendingPlugin;
+              this.readPluginSelection(installations);
+              if (
+                wasChecking !== !!this.pendingPlugin ||
+                JSON.stringify(before.installations) !==
+                  JSON.stringify(installations)
+              ) {
+                this.snapshot = { ...before, installations };
+                this.emit();
+              }
             }
           })
           .catch((error) => {
@@ -397,6 +444,7 @@ export class DesktopCatalog {
         },
         installations,
       };
+      this.readPluginSelection(installations);
       if (this.waitingForPlugin) this.pollUntil = Date.now() + 300000;
     });
   }
@@ -485,20 +533,39 @@ export class DesktopCatalog {
     });
   }
 
-  async act(body: unknown) {
+  async act<T extends Action>(body: T, kind: Kind) {
     return this.mutate(async (signal) => {
-      this.pollUntil = Date.now() + 300000;
-      this.schedulePluginPoll();
-      const result = await catalogRequest(
-        this.fetch,
-        'actions',
-        signal,
-        body,
-        this.scope,
-      );
-      if (!signal.aborted && result.installation)
-        this.updateInstallation(result.installation);
-      return result;
+      if (kind === 'plugin') {
+        if (this.pendingPlugin) throw new Error('unavailable');
+        this.pendingPlugin = body;
+        this.pollUntil = Date.now() + 300000;
+        this.schedulePluginPoll();
+      }
+      try {
+        const result = await catalogRequest(
+          this.fetch,
+          'actions',
+          signal,
+          body,
+          this.scope,
+        );
+        if (!signal.aborted) {
+          if (kind === 'plugin') this.pendingPlugin = undefined;
+          if (result.installation) this.updateInstallation(result.installation);
+        }
+        return result;
+      } catch (error) {
+        if (kind === 'plugin' && !signal.aborted) {
+          const status = catalogStatus(error);
+          if (status !== undefined && status < 500)
+            this.pendingPlugin = undefined;
+          else
+            // A lost response can still commit the selection. Keep polling by exact version.
+            this.pollUntil =
+              Date.now() + (this.pluginOperation ? 300000 : 30000);
+        }
+        throw error;
+      }
     });
   }
 
@@ -519,7 +586,8 @@ export class DesktopCatalog {
       throw error;
     } finally {
       this.mutating = false;
-      if (!this.waitingForPlugin) this.pluginOperation = undefined;
+      if (!this.pendingPlugin && !this.waitingForPlugin)
+        this.pluginOperation = undefined;
       this.schedulePluginPoll();
       this.emit();
     }

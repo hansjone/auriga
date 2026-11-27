@@ -28,6 +28,8 @@ export function pluginState({ home, who }) {
     ownerId: who.ownerId,
     hostId: who.hostId,
   };
+  /** @type {Map<string, any>} */
+  const recentFailures = new Map();
   /** @param {any} row */
   const proof = (row) => ({
     identity: row.resource.identity,
@@ -143,12 +145,21 @@ export function pluginState({ home, who }) {
       );
     },
     /** Keep diagnostic records separate from the proof format used by older clients.
-     * @param {any} row @param {string} name */
-    readFailure(row, name) {
-      const value = readRecord(file(row) + '.failure');
+     * @param {any} row */
+    readFailure(row) {
+      const value =
+        recentFailures.get(row.resource.identity.packageId) ??
+        readRecord(file(row) + '.failure');
       if (value === undefined) return undefined;
       if (
-        !exact(value, ['scope', 'name', 'proof', ...revisions, 'diagnostic']) ||
+        !exact(value, [
+          'scope',
+          'phase',
+          'proof',
+          ...revisions,
+          'diagnostic',
+        ]) ||
+        !['prepare', 'host'].includes(value.phase) ||
         canonicalize(value.scope) !== canonicalize(scope) ||
         !revisions.every(
           (key) => Number.isSafeInteger(value[key]) && value[key] >= 0,
@@ -157,8 +168,7 @@ export function pluginState({ home, who }) {
         !validPluginDiagnostic(value.diagnostic)
       )
         refuse('resource.storage_unavailable');
-      return value.name === name &&
-        canonicalize(value.proof) === canonicalize(proof(row))
+      return canonicalize(value.proof) === canonicalize(proof(row))
         ? value
         : undefined;
     },
@@ -166,17 +176,23 @@ export function pluginState({ home, who }) {
     failure(value, row) {
       return sameRevision(value, row) ? value.diagnostic : undefined;
     },
-    /** @param {any} row @param {string} name @param {{reason:string,trace_id:string}} diagnostic */
-    async writeFailure(row, name, diagnostic) {
-      await commit(file(row) + '.failure', {
+    /** @param {any} row @param {'prepare'|'host'} phase @param {{reason:string,trace_id:string}} diagnostic */
+    async writeFailure(row, phase, diagnostic) {
+      const packageId = row.resource.identity.packageId;
+      const record = {
         scope,
-        name,
+        phase,
         proof: proof(row),
         installationRevision: row.installationRevision,
         selectionRevision: row.selectionRevision,
         generation: row.generation,
         diagnostic,
-      });
+      };
+      recentFailures.delete(packageId);
+      recentFailures.set(packageId, record);
+      const oldest = recentFailures.keys().next().value;
+      if (recentFailures.size > 128 && oldest) recentFailures.delete(oldest);
+      await commit(file(row) + '.failure', record);
     },
     /** Persist the public operation result before reporting or scheduling another attempt.
      * @param {any} row @param {string} name @param {boolean} installed @param {string|null} [action] */

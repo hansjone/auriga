@@ -256,7 +256,7 @@ export function catalogRoutes(options) {
             'confirmation',
           ]))
       )
-        result = await s.apply(input);
+        result = await s.apply(input, true);
       else if (path === 'observe' && exact(input, ['packageId', 'preset']))
         result = await s.observe(input.packageId, input.preset);
       else if (path === 'submission-targets' && exact(input, ['snapshotId']))

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { resourceHost } from '../../src/resources/host.js';
 import { nativePluginFailure } from '../../src/resources/diagnostics.js';
 import { catalogFixture } from './catalog-fixture.js';
@@ -181,6 +182,71 @@ test('native dependency failure survives restart and only a new selection retrie
   f.allow();
   assert.equal((await restarted.list()).items[0].state, 'applied');
   assert.equal(attempts, 2);
+});
+
+test('desktop selection is accepted before download and a download failure can be retried', async (t) => {
+  const f = setup(t);
+  let downloads = 0;
+  const service = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: f.pluginHost,
+    fetchImpl: async (url, options) =>
+      url.pathname.endsWith('/member/downloads') && ++downloads === 1
+        ? Response.json({ code: 'common.unavailable' }, { status: 503 })
+        : f.fetchImpl(url, options),
+  });
+  assert.equal(
+    (await service.apply(f.input, true)).installation.state,
+    'applying',
+  );
+  assert.equal(downloads, 0);
+  const first = (await service.list()).items[0];
+  assert.equal(first.state, 'failed');
+  assert.equal(first.pluginFailure.reason, 'platform_unreachable');
+  assert.deepEqual(
+    (await service.list()).items[0].pluginFailure,
+    first.pluginFailure,
+  );
+  assert.equal(downloads, 1);
+  assert.deepEqual(f.calls, []);
+  await service.apply({ ...f.input, revision: 1, key: 'retry-download' }, true);
+  assert.equal(downloads, 1);
+  f.allow();
+  assert.equal((await service.list()).items[0].state, 'applied');
+  assert.deepEqual(f.calls, ['install', 'enable']);
+});
+
+test('native disk-full remains visible and is not retried when the failure record cannot be written', async (t) => {
+  let installs = 0;
+  const f = setup(t, {
+    install: async () => {
+      installs++;
+      mkdirSync(
+        join(
+          f.directory,
+          'plugin-installations',
+          f.packageId + '.json.failure',
+        ),
+        { recursive: true },
+      );
+      throw nativePluginFailure(
+        { packageResult: { kind: 'disk-full' } },
+        'install',
+      );
+    },
+  });
+  await f.service.apply(f.input);
+  f.allow();
+  const first = (await f.service.list()).items[0];
+  assert.equal(first.state, 'failed');
+  assert.equal(first.pluginFailure.reason, 'plugin_install_disk_full');
+  assert.deepEqual(
+    (await f.service.list()).items[0].pluginFailure,
+    first.pluginFailure,
+  );
+  assert.equal(installs, 1);
 });
 
 test('all-disabled native entries never prove the bundle active', async () => {
