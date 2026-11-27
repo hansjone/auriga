@@ -654,6 +654,28 @@ export function createTeam({
       disposers.push(
         registerTeamTools(ctx.tools, list.tools, toolCall, ctx.logger),
       );
+      // After rebuild (auth self-heal), rebind a still-live host session so
+      // receive polling resumes without waiting for the next tool call.
+      const state = vault.snapshot();
+      const candidates = [
+        ...Object.values(state.threads ?? {}).map(
+          (/** @type {any} */ row) => row?.sessionId,
+        ),
+        ...Object.values(state.pendingOpens ?? {}).map(
+          (/** @type {any} */ row) => row?.sessionId,
+        ),
+      ].filter((id) => typeof id === 'string' && id);
+      for (const sessionId of candidates) {
+        if (closed) break;
+        if (!ctx.sessions?.get?.(sessionId)) continue;
+        try {
+          await endpoint(sessionId);
+          primarySession = sessionId;
+          break;
+        } catch {
+          /* try the next durable session */
+        }
+      }
       timer = setInterval(() => {
         void poll().catch(() => {
           /* Retry only private lease pull/ACK, never model writes. */

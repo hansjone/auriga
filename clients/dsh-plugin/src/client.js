@@ -2931,6 +2931,7 @@ window.__ModuleLoader__.load({
                     boot: { mode: 'connect' },
                     shell,
                     reloadShell,
+                    setShell,
                     modal: true,
                   })
                 : h(
@@ -2993,6 +2994,7 @@ window.__ModuleLoader__.load({
           boot,
           shell,
           reloadShell,
+          setShell,
           gotoSettings,
           modal = false,
         }) {
@@ -3028,6 +3030,22 @@ window.__ModuleLoader__.load({
             intent.current = action === 'cancel_login' ? 'cancel' : action;
             setBusy(true);
             setOutcome('');
+            if (action === 'logout') {
+              // Drop resident account/market before the remote round-trip so a
+              // hung or 503 logout cannot leave the previous identity on screen.
+              updateDesktopCatalog({ loggedIn: false }, ++shellReadSequence);
+              if (typeof setShell === 'function')
+                setShell({
+                  available: true,
+                  loggedIn: false,
+                  connected: false,
+                  recovering: false,
+                  account: null,
+                  platform: 'signed_out',
+                  csrf: shell?.csrf,
+                  brokerAvailable: shell?.brokerAvailable,
+                });
+            }
             postLocal('auriga/shell/command', shell?.csrf, {
               action,
               ...(input ? { input } : {}),
@@ -3430,7 +3448,7 @@ window.__ModuleLoader__.load({
             : ['127.0.0.1', '[::1]', 'localhost'].includes(
                 window.location.hostname,
               );
-          const [shell, reloadShell] = useLocalStatus(
+          const [shell, reloadShell, setShell] = useLocalStatus(
             'auriga/shell/status',
             4000,
             local,
@@ -3622,6 +3640,7 @@ window.__ModuleLoader__.load({
                     reloadShell();
                     retry();
                   },
+                  setShell: local ? setShell : undefined,
                   gotoSettings: () => setTab('settings'),
                 }),
               ),
