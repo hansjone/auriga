@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
@@ -132,11 +134,11 @@ func unifiedSkillFileAllowed(name string) bool {
 }
 
 func unifiedArchivePath(name string) (string, error) {
-	if !utf8.ValidString(name) || len(name) > 240 || strings.ContainsAny(name, "\\:\x00") || strings.HasPrefix(name, "/") {
+	if !utf8.ValidString(name) || strings.ContainsAny(name, "\\:\x00") || strings.HasPrefix(name, "/") {
 		return "", fmt.Errorf("unsafe skill archive path")
 	}
 	name = strings.TrimSuffix(name, "/")
-	if name == "" || path.Clean(name) != name || len(strings.Split(name, "/")) > 8 {
+	if name == "" || len(name) > 240 || path.Clean(name) != name || len(strings.Split(name, "/")) > 8 {
 		return "", fmt.Errorf("unsafe skill archive path")
 	}
 	parts := strings.Split(name, "/")
@@ -206,7 +208,7 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 		if err != nil {
 			return err
 		}
-		key := norm.NFC.String(strings.ToLower(strings.ToUpper(norm.NFC.String(name))))
+		key := norm.NFC.String(cases.Lower(language.Und).String(cases.Upper(language.Und).String(norm.NFC.String(name))))
 		if seen[key] {
 			return fmt.Errorf("skill path collision")
 		}

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { File as NodeFile } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import {
   prepareUpload,
   packSkillFolder,
@@ -115,6 +115,54 @@ it('packs skill folder containing scripts and root dependency manifest and parse
     'skill/requirements.txt',
     'skill/scripts/run.py',
   ]);
+
+  // Also verify an archive containing an explicit 0755 scripts/ directory header.
+  const enc = new TextEncoder();
+  const makeEntry = (name: string, body: string, dir = false) => {
+    const data = dir ? new Uint8Array(0) : enc.encode(body);
+    const block = new Uint8Array(512 + Math.ceil(data.length / 512) * 512);
+    block.set(enc.encode(name), 0);
+    block.set(enc.encode(dir ? '0000755\0' : '0000644\0'), 100);
+    block.set(enc.encode('0000000\0'), 108);
+    block.set(enc.encode('0000000\0'), 116);
+    block.set(
+      enc.encode(data.length.toString(8).padStart(11, '0') + '\0'),
+      124,
+    );
+    block.set(enc.encode('00000000000\0'), 136);
+    block.set(enc.encode('        '), 148);
+    block[156] = dir ? 53 : 48;
+    block.set(enc.encode('ustar\0'), 257);
+    block.set(enc.encode('00'), 263);
+    const sum = block.subarray(0, 512).reduce((n, b) => n + b, 0);
+    block.set(enc.encode(sum.toString(8).padStart(6, '0') + '\0 '), 148);
+    block.set(data, 512);
+    return block;
+  };
+  const chunks = [
+    makeEntry('scripts/', '', true),
+    makeEntry('SKILL.md', '---\nname: sample\ndescription: Sample\n---\nBody'),
+    makeEntry('scripts/run.py', 'print("ok")\n'),
+    new Uint8Array(1024),
+  ];
+  const rawTar = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let pos = 0;
+  for (const c of chunks) {
+    rawTar.set(c, pos);
+    pos += c.length;
+  }
+  const explicitArchive = new NodeFile(
+    [gzipSync(rawTar)],
+    'explicit-scripts.tgz',
+  ) as unknown as File;
+  const parsedExplicit = await parseResourceSource(
+    [explicitArchive],
+    'skill',
+    'Alice',
+  );
+  expect(
+    parsedExplicit.skillFiles?.map((f) => f.webkitRelativePath).sort(),
+  ).toEqual(['skill/SKILL.md', 'skill/scripts/run.py']);
 });
 it.each([
   '../SKILL.md',

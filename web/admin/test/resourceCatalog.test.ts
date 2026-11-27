@@ -138,9 +138,12 @@ afterEach(() => {
 it('loads reviewId detail, exact preconditions and command risk floor; text stays inert', async () => {
   const view = setup();
   vi.spyOn(api, 'artifact').mockResolvedValue({} as Response);
-  vi.spyOn(preview, 'skillPreview').mockResolvedValue([
-    { path: 'SKILL.md', text: '<script>alert(1)</script>\nrun terminal' },
-  ]);
+  vi.spyOn(preview, 'archivePreviewWithMeta').mockResolvedValue({
+    files: [
+      { path: 'SKILL.md', text: '<script>alert(1)</script>\nrun terminal' },
+    ],
+    truncated: false,
+  });
   const decide = vi.spyOn(api, 'decide').mockResolvedValue(r);
   await flushPromises();
   await view.get('[data-testid="catalog-review"]').trigger('click');
@@ -431,12 +434,35 @@ it('rejects preview traversal, links, invalid UTF-8 and oversized streams', asyn
     boundedBytes(
       new ReadableStream({
         start(c) {
-          c.enqueue(new Uint8Array(11 * 1024 * 1024));
+          c.enqueue(new Uint8Array(21 * 1024 * 1024));
           c.close();
         },
       }),
     ),
   ).rejects.toThrow('Preview budget');
+
+  const bigTar = (tail: string) => {
+    const body = 'a'.repeat(300 * 1024) + tail;
+    const bodyBytes = new TextEncoder().encode(body);
+    const padded = Math.ceil(bodyBytes.length / 512) * 512;
+    const buf = new Uint8Array(512 + padded + 1024);
+    buf.set(new TextEncoder().encode('scripts/big.py'));
+    buf.set(
+      new TextEncoder().encode(
+        bodyBytes.length.toString(8).padStart(11, '0') + '\0',
+      ),
+      124,
+    );
+    buf[156] = 48;
+    buf.set(bodyBytes, 512);
+    return buf;
+  };
+  const a = tarText(bigTar('ONE'))[0]!;
+  const b = tarText(bigTar('TWO'))[0]!;
+  expect(a.truncated).toBe(true);
+  expect(b.truncated).toBe(true);
+  expect(a.text).toBe(b.text);
+  expect(a.contentHash).not.toBe(b.contentHash);
 });
 
 it('enforces plugin R2 and distinct security quorum even on a malformed lower server assessment', () => {

@@ -614,6 +614,7 @@ export function catalogService(options) {
       if (
         !Array.isArray(list) ||
         list.length !== 1 ||
+        list[0]?.role !== 'payload' ||
         typeof list[0]?.digest !== 'string' ||
         !list[0].digest
       )
@@ -649,6 +650,8 @@ export function catalogService(options) {
     );
     const result = review.value;
     const submittedPayloadDigest = receiptPayloadDigest(result?.version);
+    if (submittedPayloadDigest !== artifacts[0].digest)
+      refuse('resource.digest_mismatch');
     if (
       !uuid(result?.reviewId) ||
       result.authorId !== who.ownerId ||
@@ -658,8 +661,7 @@ export function catalogService(options) {
       result.version?.kind !== kind ||
       result.version?.version !== version ||
       result.version?.digest !== manifestDigest ||
-      result.version?.state !== 'pending_review' ||
-      submittedPayloadDigest !== artifacts[0].digest
+      result.version?.state !== 'pending_review'
     )
       refuse('common.validation_failed');
     return {

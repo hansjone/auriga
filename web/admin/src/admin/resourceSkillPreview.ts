@@ -205,14 +205,17 @@ export function tarText(raw: Uint8Array): PreviewFile[] {
         ? fullText.slice(0, maxTextPreviewBytes) +
           `\n\n[文件较大 (${size} bytes)，仅展示前 256 KiB 预览]`
         : fullText;
-      result.push({
-        path,
-        text,
-        sizeBytes: size,
-        ...(truncated
-          ? { truncated: true, contentHash: fnv1a64Hex(fullSlice) }
-          : {}),
-      });
+      result.push(
+        truncated
+          ? {
+              path,
+              text,
+              sizeBytes: size,
+              truncated: true,
+              contentHash: fnv1a64Hex(fullSlice),
+            }
+          : { path, text },
+      );
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }

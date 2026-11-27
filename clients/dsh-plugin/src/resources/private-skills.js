@@ -229,7 +229,10 @@ export function createPrivateSkills({ home }) {
           path.split('/').length > 8 ||
           /[\\:]/.test(path) ||
           /~[0-9]/i.test(path) ||
-          [...path].some((c) => c.charCodeAt(0) < 32) ||
+          [...path].some((c) => {
+            const code = c.charCodeAt(0);
+            return code < 32 || (code >= 0x7f && code <= 0x9f);
+          }) ||
           /[. ]$/.test(entry.name) ||
           /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(entry.name)
         )

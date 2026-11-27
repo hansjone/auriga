@@ -229,12 +229,13 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
     if (
       kind === 'skill' &&
       directory &&
-      path !== 'references' &&
-      path !== 'assets' &&
-      path !== 'scripts' &&
-      !path.startsWith('references/') &&
-      !path.startsWith('assets/') &&
-      !path.startsWith('scripts/')
+      (path.split('/').length > 8 ||
+        (path !== 'references' &&
+          path !== 'assets' &&
+          path !== 'scripts' &&
+          !path.startsWith('references/') &&
+          !path.startsWith('assets/') &&
+          !path.startsWith('scripts/')))
     )
       fail('skillFileInvalid', path);
     const key = path
