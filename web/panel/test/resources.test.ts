@@ -1,5 +1,10 @@
 ﻿import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountPanel, flushPromises, type NativeWrapper } from './native-host';
+import {
+  mountPanel,
+  flushPromises,
+  flushSearch,
+  type NativeWrapper,
+} from './native-host';
 import type { PanelContext } from '../src/resources';
 import { AurigaTeamPanel } from '../src';
 const id = (n: number) =>
@@ -183,7 +188,7 @@ it('loads plugin market metadata from later pages and scopes likes to the native
     },
   });
   await w.get('input').setValue('Docs');
-  await flushPromises();
+  await flushSearch();
   expect(w.text()).toContain(projected.name);
   expect(w.text()).toContain('2.0.0');
   expect(w.text()).toContain('Unknown');

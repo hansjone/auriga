@@ -80,8 +80,7 @@ public class CatalogController {
       @PathVariable UUID p,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(required = false) String cursor) {
-    return response(
-        workflow.list(actor(), p, null, limit, cursor, null, null, null, null), 200);
+    return response(workflow.list(actor(), p, null, limit, cursor, null, null, null, null), 200);
   }
 
   @GetMapping("/catalog/packages/{p}/versions/{v}")

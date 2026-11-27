@@ -4,6 +4,12 @@ import { registerPanel, AurigaTeamPanel } from '../src/index';
 export async function flushPromises() {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
+
+/** Wait for SkillPanel market search debounce (300ms) then flush microtasks. */
+export async function flushSearch() {
+  await new Promise<void>((resolve) => setTimeout(resolve, 350));
+  await flushPromises();
+}
 export class NativeNode {
   constructor(readonly element?: Element) {}
   exists() {

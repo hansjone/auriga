@@ -671,9 +671,7 @@ public final class CatalogWorkflow {
           ON dv.tenant_id=p.tenant_id AND dv.id=p.default_version_id AND dv.state='published'
         """;
     String where =
-        " WHERE p.tenant_id=:tenant"
-            + visible(r)
-            + (kind == null ? "" : " AND p.kind=:kind");
+        " WHERE p.tenant_id=:tenant" + visible(r) + (kind == null ? "" : " AND p.kind=:kind");
     if (!query.isEmpty())
       where +=
           """
@@ -726,18 +724,18 @@ public final class CatalogWorkflow {
         };
     var a = args(r, "kind", kind, "limit", limit, "offset", (long) (page - 1) * limit);
     if (!query.isEmpty())
-      a.put(
-          "q",
-          "%"
-              + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-              + "%");
+      a.put("q", "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%");
     int total =
-        ((Number)
-                db.row("SELECT COUNT(*)::bigint AS total FROM " + from + where, a).get("total"))
+        ((Number) db.row("SELECT COUNT(*)::bigint AS total FROM " + from + where, a).get("total"))
             .intValue();
     var rows =
         db.rows(
-            "SELECT p.* FROM " + from + where + " ORDER BY " + order + " LIMIT :limit OFFSET :offset",
+            "SELECT p.* FROM "
+                + from
+                + where
+                + " ORDER BY "
+                + order
+                + " LIMIT :limit OFFSET :offset",
             a);
     var result = JSON.createObjectNode();
     var items = result.putArray("items");
