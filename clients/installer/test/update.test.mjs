@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   mkdirSync,
+  renameSync,
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -1469,6 +1470,63 @@ test('update diagnostics rotate at 256 KiB and uninstall removes both files', as
   uninstall({ root: f.root });
   assert.equal(existsSync(log), false);
   assert.equal(existsSync(log + '.1'), false);
+});
+
+test('defer queue rename retries transient EPERM and keeps resume if publish still fails', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    /\/latest(?:\?|$)/.test(url)
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  let attempts = 0;
+  const updater = resumedUpdater(f, request, {
+    defer: true,
+    queueRenameDelays: [1, 1],
+    rename(from, to) {
+      attempts++;
+      if (attempts <= 2) {
+        throw Object.assign(new Error('filter hold'), { code: 'EPERM' });
+      }
+      return renameSync(from, to);
+    },
+  });
+  await updater.check();
+  await updater.update();
+  assert.equal(attempts, 3);
+  assert.equal(
+    existsSync(join(f.root, 'desktop-pending', 'release.json')),
+    true,
+  );
+  assert.equal(existsSync(join(f.root, '.desktop-resume')), false);
+  assert.equal(updater.status().restartRequired, true);
+
+  rmSync(join(f.root, 'desktop-pending'), { recursive: true, force: true });
+  changeUpdateState(f.root, (state) => ({
+    ...state,
+    phase: 'idle',
+    available: manifest,
+    applyRetry: null,
+  }));
+  let denied = 0;
+  const blocked = resumedUpdater(f, request, {
+    defer: true,
+    queueRenameDelays: [1, 1],
+    rename() {
+      denied++;
+      throw Object.assign(new Error('still denied'), { code: 'EPERM' });
+    },
+  });
+  await assert.rejects(blocked.update(), { code: 'EPERM' });
+  assert.equal(denied, 3);
+  assert.equal(
+    readFileSync(
+      join(f.root, '.desktop-resume', desktopPlatform().stagedPackageName),
+      'utf8',
+    ),
+    'zip',
+  );
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
 });
 
 test('writeAtomic retries transient EPERM/EBUSY renames and cleans temp files on failure', (t) => {

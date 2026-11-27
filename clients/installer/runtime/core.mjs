@@ -156,7 +156,11 @@ const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 /** Retry transient Windows file/dir rename errors caused by AV/EDR or closing handles. */
-function renameWithRetry(from, to, { rename = renameSync, retries = 15 } = {}) {
+export function renameWithRetry(
+  from,
+  to,
+  { rename = renameSync, retries = 15 } = {},
+) {
   for (let attempt = 0; ; attempt++) {
     try {
       rename(from, to);

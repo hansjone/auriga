@@ -291,6 +291,34 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
   return payloadDir;
 }
 
+/** Publish the verified resume directory as desktop-pending.
+ * Windows AV/EDR often holds the freshly written package briefly; retry and keep
+ * the resume tree if the atomic rename still cannot complete. */
+async function publishPendingQueue(
+  temporary,
+  queued,
+  {
+    rename = renameSync,
+    delays = [100, 250, 500, 1000, 2000, 3000, 5000, 8000],
+    onRetry = () => {},
+  } = {},
+) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(temporary, queued);
+      return;
+    } catch (error) {
+      if (
+        !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) ||
+        attempt >= delays.length
+      )
+        throw error;
+      onRetry(error, attempt + 1);
+      await delay(delays[attempt]);
+    }
+  }
+}
+
 export function createUpdater({
   root,
   origin,
@@ -305,6 +333,8 @@ export function createUpdater({
   schedule = setTimeout,
   unschedule = clearTimeout,
   onState = () => {},
+  rename = renameSync,
+  queueRenameDelays,
 }) {
   const bindingFile = join(root, 'desktop-origin.json');
   const binding = existsSync(bindingFile)
@@ -684,8 +714,21 @@ export function createUpdater({
             writeFileSync(join(temporary, 'approval-required'), '', {
               mode: 0o600,
             });
-          renameSync(temporary, queued);
+          // Keep verified bytes if Windows still refuses the publish rename.
+          retain = true;
+          await publishPendingQueue(temporary, queued, {
+            rename,
+            ...(queueRenameDelays ? { delays: queueRenameDelays } : {}),
+            onRetry: (error, attempt) =>
+              logUpdate(root, {
+                stage: 'queue',
+                phase: 'retrying',
+                code: error.code,
+                attempt,
+              }),
+          });
           temporary = undefined;
+          retain = false;
           progress('ready', { available: null, applyRetry: null });
           return { restartRequired: true, queued: true };
         }
