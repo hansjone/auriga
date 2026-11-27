@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resourceHost } from '../../src/resources/host.js';
+import { nativePluginFailure } from '../../src/resources/diagnostics.js';
 import { catalogFixture } from './catalog-fixture.js';
 import { catalogService } from './broker-fixture.js';
 
@@ -142,6 +143,64 @@ test('restart-required installation is reported and is not retried by polling or
     pluginHost: f.pluginHost,
   }).list();
   assert.equal(installs, 1);
+});
+
+test('native dependency failure survives restart and only a new selection retries', async (t) => {
+  let attempts = 0;
+  const f = setup(t, {
+    install: async (file, name) => {
+      if (++attempts === 1)
+        throw nativePluginFailure(
+          { packageResult: { kind: 'network', stderr: 'private detail' } },
+          'install',
+          'ab123456-7890-4321-8765-abcdef123456',
+        );
+      f.setActual({ name, installed: true, enabled: false, version: '1.0.0' });
+      return { restartRequired: false };
+    },
+  });
+  await f.service.apply(f.input);
+  f.allow();
+  const result = await f.service.list();
+  const failure = {
+    reason: 'plugin_install_network',
+    trace_id: 'ab123456789043218765abcdef123456',
+  };
+  assert.equal(result.items[0].state, 'failed');
+  assert.deepEqual(result.items[0].pluginFailure, failure);
+  assert.equal(JSON.stringify(result).includes('private detail'), false);
+  const restarted = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: f.pluginHost,
+  });
+  assert.deepEqual((await restarted.list()).items[0].pluginFailure, failure);
+  assert.equal(attempts, 1);
+  await restarted.apply({ ...f.input, revision: 1, key: 'retry-once' });
+  f.allow();
+  assert.equal((await restarted.list()).items[0].state, 'applied');
+  assert.equal(attempts, 2);
+});
+
+test('all-disabled native entries never prove the bundle active', async () => {
+  const host = resourceHost({
+    get: () => ({
+      listBundles: async () => [
+        {
+          name: 'disabled',
+          installed: true,
+          enabled: true,
+          rows: [{ entryId: 'entry' }],
+        },
+      ],
+      listPlugins: async () => [{ entryId: 'entry', enabled: false }],
+      installBundle() {},
+      setBundleEnabled() {},
+      removeBundle() {},
+    }),
+  });
+  assert.equal((await host.observe('disabled')).active, false);
 });
 
 test('an empty native bundle row list never proves active', async () => {

@@ -16,7 +16,11 @@ import {
   refuse,
   uuid,
 } from './trust.js';
-import { resourceStage, resourceFailure } from './diagnostics.js';
+import {
+  diagnoseResource,
+  resourceStage,
+  resourceFailure,
+} from './diagnostics.js';
 import { validateArchive } from './archive.js';
 /** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,pluginHost?:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>,now?:()=>number}} options */
 export function catalogService(options) {
@@ -63,6 +67,30 @@ export function catalogService(options) {
       ? pluginState({ home: options.home, who })
       : undefined;
   const now = options.now ?? (() => performance.now());
+  /** @type {{packageId:string,versionId:string,phase:string,attempt?:{index:number,total:number}}|undefined} */
+  let activePlugin;
+  /** @template T @param {any} row @param {string} phase @param {(progress:(phase:string,attempt?:{index:number,total:number})=>void)=>Promise<T>} work */
+  async function pluginProgress(row, phase, work) {
+    const { kind, packageId, versionId } = row.resource.identity;
+    if (kind !== 'plugin') return work(() => {});
+    const progress = (
+      /** @type {string} */ phase,
+      /** @type {{index:number,total:number}|undefined} */ attempt = undefined,
+    ) => {
+      activePlugin = {
+        packageId,
+        versionId,
+        phase,
+        ...(attempt && { attempt }),
+      };
+    };
+    progress(phase);
+    try {
+      return await work(progress);
+    } finally {
+      activePlugin = undefined;
+    }
+  }
   let nextRefresh = 0,
     retryAfter = 0,
     failures = 0,
@@ -197,8 +225,8 @@ export function catalogService(options) {
     for (const installation of rows.filter(
       (r) => desiredState(r.resource) === 'ENABLED',
     )) {
-      const download = await resourceStage('download', () =>
-          api.download(installation),
+      const download = await pluginProgress(installation, 'downloading', () =>
+          resourceStage('download', () => api.download(installation)),
         ),
         manifest = parseStrictJson(download.manifest);
       const release = {
@@ -216,11 +244,13 @@ export function catalogService(options) {
         expected: download.ref.identity,
         now: new Date().toISOString(),
       };
-      await resourceStage('verification', async () =>
-        verifyTrust(
-          'revocation',
-          { release, list: parseStrictJson(download.revocations) },
-          roots,
+      await pluginProgress(installation, 'verifying', () =>
+        resourceStage('verification', async () =>
+          verifyTrust(
+            'revocation',
+            { release, list: parseStrictJson(download.revocations) },
+            roots,
+          ),
         ),
       );
       if (
@@ -311,6 +341,8 @@ export function catalogService(options) {
           local.state,
         );
       let state = local.state;
+      /** @type {{reason:string,trace_id:string}|undefined} */ let diagnostic;
+      let recordedFailure = false;
       /** @type {string|undefined} */ let name;
       async function checkSelection() {
         const selected = (await api.list()).find(
@@ -332,7 +364,14 @@ export function catalogService(options) {
       }
       /** @param {string} action @param {boolean} installed @param {()=>Promise<any>} work */
       async function operation(action, installed, work) {
-        const outcome = await work();
+        let outcome;
+        try {
+          outcome = await work();
+        } catch (error) {
+          if (!(/** @type {any} */ (error).nativePluginOperation)) throw error;
+          diagnostic = diagnoseResource(error, 'plugin').body;
+          return false;
+        }
         api.check();
         await plugins?.write(
           row,
@@ -353,7 +392,10 @@ export function catalogService(options) {
         });
         let actual = await host.observe(name);
         const proof = plugins?.read(row, name);
-        let ready = !plugins?.waiting(proof, row);
+        const previousFailure = plugins.readFailure(row, name);
+        diagnostic = plugins.failure(previousFailure, row);
+        recordedFailure = !!diagnostic;
+        let ready = !diagnostic && !plugins.waiting(proof, row);
         if (
           ready &&
           (!proof?.installed ||
@@ -368,7 +410,9 @@ export function catalogService(options) {
           api.check();
           if (ready)
             ready = await operation('install', true, () =>
-              host.install(bundle.file, name),
+              pluginProgress(row, 'installing_dependencies', (progress) =>
+                host.install(bundle.file, name, progress),
+              ),
             );
         }
         api.check();
@@ -377,9 +421,20 @@ export function catalogService(options) {
         if (!desktop.pluginBundle(who, row))
           refuse('resource.signature_invalid');
         actual = await host.observe(name);
-        if (ready && !actual?.enabled)
+        const retryInactive = !!(
+          previousFailure &&
+          actual?.enabled &&
+          !actual.active
+        );
+        if (ready && retryInactive) {
+          ready = await operation('disable', true, () =>
+            host.enable(name, false),
+          );
+          await checkSelection();
+        }
+        if (ready && (!actual?.enabled || retryInactive))
           ready = await operation('enable', true, () =>
-            host.enable(name, true),
+            pluginProgress(row, 'enabling', () => host.enable(name, true)),
           );
         actual = await host.observe(name);
         api.check();
@@ -390,11 +445,30 @@ export function catalogService(options) {
           actual.active === true &&
           actual.version === row.resource.identity.version
             ? 'applied'
-            : 'pending_restart';
+            : diagnostic
+              ? 'failed'
+              : ready
+                ? 'failed'
+                : 'pending_restart';
+        if (state === 'failed' && !diagnostic)
+          diagnostic = diagnoseResource(
+            resourceFailure(
+              'resource.apply_failed',
+              'plugin_not_active',
+              'plugin',
+            ),
+            'plugin',
+          ).body;
       } else {
         name = /** @type {string} */ (desktop.pluginName(who, row));
         const proof = plugins?.read(row, name);
-        let ready = !plugins?.waiting(proof, row);
+        if (
+          desiredState(row.resource) !== 'ENABLED' &&
+          !['expired', 'revoked'].includes(local.state)
+        )
+          diagnostic = plugins.failure(plugins.readFailure(row, name), row);
+        recordedFailure = !!diagnostic;
+        let ready = !diagnostic && !plugins.waiting(proof, row);
         const actual = await host.observe(name);
         if (ready && actual?.enabled)
           ready = await operation('disable', proof?.installed === true, () =>
@@ -409,11 +483,12 @@ export function catalogService(options) {
           ready = await operation('remove', false, () => host.remove(name));
         const observed = await host.observe(name);
         if (
+          diagnostic ||
           !ready ||
           observed?.enabled ||
           (desiredState(row.resource) === 'REMOVED' && observed?.installed)
         )
-          state = 'pending_restart';
+          state = diagnostic || ready ? 'failed' : 'pending_restart';
       }
       const report = {
         clientId: who.hostId,
@@ -431,10 +506,20 @@ export function catalogService(options) {
       };
       api.check();
       await checkSelection();
+      if (diagnostic && name && !recordedFailure)
+        await plugins.writeFailure(row, name, {
+          reason: diagnostic.reason,
+          trace_id: diagnostic.trace_id,
+        });
       if (row.state !== state) await api.report(report);
       if (state === 'applied' && local.state !== 'applied')
         desktop.acknowledge(who, report);
       row.state = state;
+      if (diagnostic)
+        row.pluginFailure = {
+          reason: diagnostic.reason,
+          trace_id: diagnostic.trace_id,
+        };
     }
   }
   async function enforcePersonalPolicy() {
@@ -684,6 +769,10 @@ export function catalogService(options) {
   return {
     who,
     cloud,
+    pluginOperation() {
+      api.check();
+      return activePlugin ?? null;
+    },
     async list() {
       return serial(async () => {
         let pendingRestart = false;
@@ -755,7 +844,14 @@ export function catalogService(options) {
               ?.installations.some(
                 (/** @type {any} */ r) =>
                   desiredState(r.resource) === 'ENABLED' &&
-                  r.state === 'applying',
+                  r.state === 'applying' &&
+                  (r.resource.identity.kind !== 'plugin' ||
+                    !items.some(
+                      (item) =>
+                        item.resource.identity.packageId ===
+                          r.resource.identity.packageId &&
+                        item.state !== 'applying',
+                    )),
               );
         } catch (error) {
           if (/** @type {any} */ (error).hostLockOccupied !== true) throw error;
@@ -964,6 +1060,12 @@ export function catalogService(options) {
           await finish();
         } catch (error) {
           if (!occupied(error)) throw error;
+          if (identity.kind === 'plugin')
+            throw resourceFailure(
+              'resource.storage_unavailable',
+              'storage_unavailable',
+              'storage',
+            );
           await api.report({
             clientId: who.hostId,
             identity: row.resource.identity,

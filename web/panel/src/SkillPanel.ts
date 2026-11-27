@@ -151,7 +151,7 @@ export class SkillPanel {
       applying: '正在应用',
       applied: '已生效',
       failed: '失败',
-      pending_restart: '待重启或确认',
+      pending_restart: this.kind === 'plugin' ? '待重启 DSH' : '待重启或确认',
       superseded: '已被新选择替代',
       overridden: '被同名技能覆盖',
       expired: '已过期',
@@ -167,6 +167,65 @@ export class SkillPanel {
       withdrawn: '已撤回',
     };
     return this.zh ? (zh[value] ?? '未知状态') : value.replaceAll('_', ' ');
+  }
+  private pluginFailure(card: HTMLElement, row?: Installation) {
+    if (this.kind !== 'plugin' || row?.state !== 'failed' || !row.pluginFailure)
+      return;
+    const { reason, trace_id } = row.pluginFailure;
+    card.append(
+      element(
+        'p',
+        resourceErrorMessage(
+          new ResourceDiagnosticError(reason, trace_id),
+          !this.zh,
+        ),
+        'notice',
+      ),
+    );
+  }
+
+  private pluginProgress() {
+    const operation = this.kind === 'plugin' && this.desktop?.pluginOperation;
+    if (!operation) return;
+    const phase: Record<string, [string, string]> = {
+      downloading: ['正在下载插件包', 'Downloading plugin package'],
+      verifying: ['正在校验签名和内容', 'Verifying signature and contents'],
+      installing_dependencies: [
+        'DSH 正在安装插件依赖',
+        'DSH is installing plugin dependencies',
+      ],
+      checking_installation: [
+        'DSH 正在确认安装结果',
+        'DSH is checking the installation',
+      ],
+      enabling: ['正在启用插件', 'Enabling the plugin'],
+    };
+    if (!Object.hasOwn(phase, operation.phase)) return;
+    const label = phase[operation.phase];
+    const pack = this.packages.find((item) => item.id === operation.packageId);
+    const attempt = operation.attempt;
+    const progress = element(
+      'p',
+      (pack ? pack.name + ' · ' : '') +
+        this.text(...label) +
+        (attempt
+          ? this.text(
+              `（安装源 ${attempt.index}/${attempt.total}）`,
+              ` (registry ${attempt.index}/${attempt.total})`,
+            )
+          : ''),
+      'notice',
+    );
+    progress.setAttribute('role', 'status');
+    this.root.append(progress);
+  }
+
+  private pluginInProgress(row: Installation | undefined, versionId: string) {
+    return (
+      this.kind === 'plugin' &&
+      row?.resource.identity.versionId === versionId &&
+      ['applying', 'pending_restart'].includes(row.state)
+    );
   }
   private authenticationRequired() {
     this.root.dispatchEvent(
@@ -395,10 +454,13 @@ export class SkillPanel {
             .join('；');
         return;
       }
-      this.notice = this.text(
-        '已接受请求，等待实际安装回报。关闭或卸载后请新建会话。',
-        'Request accepted; waiting for observed installation. Start a new session after disabling or removing.',
-      );
+      this.notice =
+        this.kind === 'plugin' && result.installation
+          ? this.status(result.installation.state)
+          : this.text(
+              '已接受请求，等待实际安装回报。关闭或卸载后请新建会话。',
+              'Request accepted; waiting for observed installation. Start a new session after disabling or removing.',
+            );
       if (!this.desktop && result.installation) {
         this.rows = this.rows.filter(
           (row) => row.resource.identity.packageId !== packageId,
@@ -732,6 +794,7 @@ export class SkillPanel {
       notice.setAttribute('role', failed ? 'alert' : 'status');
       this.root.append(notice);
     }
+    this.pluginProgress();
     if (this.sharedAvailable === false && !this.pending)
       this.root.append(
         element(
@@ -839,9 +902,15 @@ export class SkillPanel {
         );
         const installed = this.installation(pack.id);
         const action = this.button(
-          this.text('安装此精确版本', 'Install this exact version'),
+          this.kind === 'plugin' &&
+            installed?.state === 'failed' &&
+            installed.resource.identity.versionId === version.id
+            ? this.text('重试此版本', 'Retry this version')
+            : this.text('安装此精确版本', 'Install this exact version'),
           () => this.action(pack.id, version.id, 'install'),
-          version.state !== 'published' || !this.sharedAvailable,
+          version.state !== 'published' ||
+            !this.sharedAvailable ||
+            this.pluginInProgress(installed, version.id),
         );
         action.className = 'primary';
         header.append(label, action);
@@ -849,8 +918,10 @@ export class SkillPanel {
           header,
           element('p', version.manifest.description, 'resource-description'),
         );
-        if (installed?.resource.identity.versionId === version.id)
+        if (installed?.resource.identity.versionId === version.id) {
           card.append(this.badge(this.status(installed.state)));
+          this.pluginFailure(card, installed);
+        }
         card.append(
           fieldList([
             [
@@ -927,6 +998,7 @@ export class SkillPanel {
             this.badge(this.status(row.state)),
           );
           const actions = element('div', undefined, 'resource-actions');
+          this.pluginFailure(card, row);
           for (const [action, zh, en] of [
             ['enable', '启用', 'Enable'],
             ['disable', '关闭', 'Disable'],
@@ -937,6 +1009,8 @@ export class SkillPanel {
                 this.text(zh, en),
                 () => this.action(id.packageId, id.versionId, action),
                 !this.sharedAvailable ||
+                  (action === 'enable' &&
+                    this.pluginInProgress(row, id.versionId)) ||
                   (row.resource.installationMode === 'required' &&
                     ['disable', 'remove'].includes(action)),
               ),
@@ -1021,6 +1095,7 @@ export class SkillPanel {
               element('span', version.version, 'resource-version-label'),
             );
           card.append(metadata);
+          this.pluginFailure(card, row);
           if (pack.market) card.append(this.marketFacts(pack.market));
           else if (version?.manifest.author?.displayName)
             card.append(
@@ -1032,9 +1107,16 @@ export class SkillPanel {
           const defaultVersion = version?.version ?? pack.market?.version;
           if (defaultId && defaultVersion) {
             const install = this.button(
-              this.text('安装', 'Install') + ' ' + defaultVersion,
+              (this.kind === 'plugin' &&
+              row?.state === 'failed' &&
+              row.resource.identity.versionId === defaultId
+                ? this.text('重试', 'Retry')
+                : this.text('安装', 'Install')) +
+                ' ' +
+                defaultVersion,
               () => this.action(pack.id, defaultId, 'install'),
               !this.sharedAvailable ||
+                this.pluginInProgress(row, defaultId) ||
                 (version && version.state !== 'published'),
             );
             install.className = 'primary';
