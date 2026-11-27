@@ -15,8 +15,8 @@ export const skillRootDependencyFiles = new Set([
 /** @param {string} part */
 function hasIsoControl(part) {
   return [...part].some((c) => {
-    const code = c.charCodeAt(0);
-    return code < 32 || (code >= 0x7f && code <= 0x9f);
+    const code = c.codePointAt(0) ?? 0;
+    return code < 32 || (code >= 0x7f && code <= 0x9f) || code > 0xffff;
   });
 }
 

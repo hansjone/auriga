@@ -93,6 +93,8 @@ function validRange(value: unknown): value is string {
 function safePath(path: string) {
   // eslint-disable-next-line no-control-regex
   const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f-\x9f]/;
+  if ([...path].some((c) => (c.codePointAt(0) ?? 0) > 0xffff))
+    fail('pathUnsafe', path);
   if (
     !path ||
     path.startsWith('/') ||

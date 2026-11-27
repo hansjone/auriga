@@ -17,8 +17,10 @@ final class ArchivePaths {
         || name.startsWith("/")
         || name.indexOf('\\') >= 0
         || (!directory && name.endsWith("/"))) throw StrictUstarInputStream.bad();
-    for (int i = 0; i < name.length(); i++)
-      if (Character.isISOControl(name.charAt(i))) throw StrictUstarInputStream.bad();
+    for (int i = 0; i < name.length(); i++) {
+      char c = name.charAt(i);
+      if (Character.isISOControl(c) || Character.isSurrogate(c)) throw StrictUstarInputStream.bad();
+    }
     var segments = new ArrayList<String>();
     for (String segment : name.split("/", -1)) {
       if (segment.equals("..")) throw StrictUstarInputStream.bad();

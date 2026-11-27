@@ -201,10 +201,16 @@ export function tarText(raw: Uint8Array): PreviewFile[] {
       const fullText = decoder.decode(fullSlice);
       if (fullText.includes('\0')) throw new Error('Binary content');
       const truncated = fullText.length > maxTextPreviewBytes;
-      const text = truncated
-        ? fullText.slice(0, maxTextPreviewBytes) +
-          `\n\n[文件较大 (${size} bytes)，仅展示前 256K 字符预览]`
-        : fullText;
+      let previewText = fullText;
+      if (truncated) {
+        let cut = maxTextPreviewBytes;
+        const last = fullText.charCodeAt(cut - 1);
+        if (last >= 0xd800 && last <= 0xdbff) cut -= 1;
+        previewText =
+          fullText.slice(0, cut) +
+          `\n\n[文件较大 (${size} bytes)，仅展示前 256K 字符预览]`;
+      }
+      const text = previewText;
       result.push(
         truncated
           ? {
