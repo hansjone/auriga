@@ -126,7 +126,13 @@ export class Broker extends EventEmitter {
     const value = structuredClone(this.record);
     this.persistence = this.persistence
       .catch(() => {})
-      .then(() => this.vault.save(value));
+      .then(async () => {
+        await this.vault.save(value);
+        if (Array.isArray(value.revocations)) {
+          for (const token of value.revocations)
+            this.committedRevocations.add(token);
+        }
+      });
     return this.persistence;
   }
   async initialize() {
@@ -1140,8 +1146,9 @@ export class Broker extends EventEmitter {
     let timer;
     let onInvalidated;
     let onRefreshed;
+    let refreshedResult;
     try {
-      await Promise.race([
+      refreshedResult = await Promise.race([
         this.refreshTokens(forceRefresh),
         new Promise((resolve, reject) => {
           onInvalidated = () =>
@@ -1152,12 +1159,13 @@ export class Broker extends EventEmitter {
             );
           onRefreshed = (info) => {
             if (
+              info?.generation === anchorGeneration &&
               (!forceRefresh || info?.rotated) &&
               this.state === 'authenticated' &&
               this.generation === anchorGeneration &&
               this.identityKey() === anchorIdentityKey
             ) {
-              resolve(undefined);
+              resolve(info);
             }
           };
           this.once('identity_invalidated', onInvalidated);
@@ -1177,6 +1185,15 @@ export class Broker extends EventEmitter {
     const after = this.snapshot().state;
     if (after === 'authenticated') {
       assertSameAnchor();
+      if (
+        forceRefresh &&
+        (refreshedResult?.generation !== anchorGeneration ||
+          !refreshedResult?.rotated)
+      ) {
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      }
       return this.guard();
     }
     if (after === 'unreachable') throw unavailable();
@@ -1195,17 +1212,28 @@ export class Broker extends EventEmitter {
   }
   refreshTokens(forceRefresh = false) {
     if (this.tokenRefreshing) {
-      if (forceRefresh && !this.tokenRefreshingForce) {
+      if (
+        this.tokenRefreshingGeneration !== this.generation ||
+        (forceRefresh && !this.tokenRefreshingForce)
+      ) {
         return this.tokenRefreshing
           .finally(() => {})
-          .then(() => this.refreshTokens(true));
+          .then(() => this.refreshTokens(forceRefresh));
       }
       return this.tokenRefreshing;
     }
+    const targetGeneration = this.generation;
     this.tokenRefreshingForce = forceRefresh;
+    this.tokenRefreshingGeneration = targetGeneration;
     let toRevoke;
     const run = this.withTokenLock(async () => {
-      if (this.closed || !this.record.tokens || this.attempt) return;
+      if (
+        this.closed ||
+        !this.record.tokens ||
+        this.attempt ||
+        this.generation !== targetGeneration
+      )
+        return { rotated: false, generation: this.generation };
       const generation = this.generation,
         old = this.record.tokens;
       let next;
@@ -1226,18 +1254,18 @@ export class Broker extends EventEmitter {
           : old;
         if (generation !== this.generation || this.closed) {
           if (next !== old) toRevoke = next;
-          return;
+          return { rotated: false, generation };
         }
         const verified = await this.validateTokens(next, this.claims);
         if (generation !== this.generation || this.closed) {
           if (next !== old) toRevoke = next;
-          return;
+          return { rotated: false, generation };
         }
         this.record.tokens = next;
         await this.save();
         if (generation !== this.generation || this.closed) {
           if (next !== old) toRevoke = next;
-          return;
+          return { rotated: false, generation };
         }
         this.acceptVerified(verified);
         if (
@@ -1246,9 +1274,12 @@ export class Broker extends EventEmitter {
             JSON.stringify(this.projection)
         )
           this.transition('authenticated', undefined, verified.projection);
-        this.emit('auth_refreshed', { rotated: next !== old });
+        const info = { rotated: refresh, generation };
+        this.emit('auth_refreshed', info);
+        return info;
       } catch (error) {
-        if (generation !== this.generation || this.closed) return;
+        if (generation !== this.generation || this.closed)
+          return { rotated: false, generation };
         if ([400, 401, 403].includes(error.status)) {
           this.generation++;
           delete this.record.tokens;
@@ -1258,10 +1289,14 @@ export class Broker extends EventEmitter {
           await this.save();
           toRevoke = next ?? old;
         } else this.transition('unreachable', 'offline');
+        return { rotated: false, generation };
       }
     }).finally(() => {
-      this.tokenRefreshing = undefined;
-      this.tokenRefreshingForce = false;
+      if (this.tokenRefreshing === run) {
+        this.tokenRefreshing = undefined;
+        this.tokenRefreshingForce = false;
+        this.tokenRefreshingGeneration = undefined;
+      }
       if (toRevoke) this.track(this.queueRevoke(toRevoke));
     });
     this.tokenRefreshing = run;

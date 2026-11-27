@@ -1123,4 +1123,87 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   releaseSave?.();
   await queuing;
   assert.ok(revokeCallsWhileSaving >= 1);
+
+  // 6) Failed initial vault save followed by a subsequent successful save commits revocations for drain.
+  const f4 = fixture();
+  await login(f4);
+  let failOnce = true;
+  let f4Revokes = 0;
+  const origSave4 = f4.vault.save.bind(f4.vault);
+  f4.vault.save = async (value) => {
+    if (failOnce && value.revocations?.length) {
+      failOnce = false;
+      throw new Error('disk busy');
+    }
+    return origSave4(value);
+  };
+  f4.platform.revoke = async () => {
+    f4Revokes++;
+    return { correlationId: randomUUID() };
+  };
+  t.after(() => f4.broker.close());
+  await assert.rejects(
+    f4.broker.queueRevoke({ refresh_token: 'retry-save-token' }),
+  );
+  assert.equal(f4Revokes, 0);
+  await f4.broker.save();
+  await f4.broker.drainRevocations();
+  assert.equal(f4Revokes, 1);
+
+  // 7) Account B receiving 401 while account A's forceRefresh is still in flight must run its own generation refresh.
+  const f5 = fixture();
+  await login(f5);
+  let releaseRefreshA;
+  let refreshCallNum = 0;
+  const origRefresh5 = f5.platform.refresh.bind(f5.platform);
+  f5.platform.refresh = async (...args) => {
+    refreshCallNum++;
+    if (refreshCallNum === 1) {
+      await new Promise((r) => {
+        releaseRefreshA = r;
+      });
+      return {
+        ...(await origRefresh5(...args)),
+        access_token: 'stale-a-refresh',
+      };
+    }
+    return {
+      ...(await origRefresh5(...args)),
+      access_token: 'fresh-b-rotated-bearer',
+    };
+  };
+  const refreshA = f5.broker.refreshTokens(true);
+  await new Promise((r) => setTimeout(r, 10));
+  await f5.broker.logout();
+  f5.identity.memberId = randomUUID();
+  f5.tokens.access_token = 'initial-b-bearer';
+  f5.tokens.refresh_token = 'initial-b-refresh';
+  await login(f5);
+  const bBearers = [];
+  let bAttempts = 0;
+  const proxy5 = new BusinessProxy(f5.broker, async (_url, options) => {
+    bBearers.push(options.headers.Authorization);
+    bAttempts++;
+    if (bAttempts === 1) {
+      releaseRefreshA?.();
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ items: [] });
+  });
+  t.after(async () => {
+    releaseRefreshA?.();
+    proxy5.close();
+    await f5.broker.close();
+  });
+  const bRes = await proxy5.call(
+    call(f5.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await refreshA;
+  assert.ok(bRes.output, bRes.error?.code);
+  assert.equal(bAttempts, 2);
+  assert.equal(bBearers[1], 'Bearer fresh-b-rotated-bearer');
 });
