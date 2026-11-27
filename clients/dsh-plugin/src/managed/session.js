@@ -35,6 +35,8 @@ export function installManagedSessionGuard(
             '/auriga/shell/status',
             '/auriga/settings/state',
             '/auriga/settings/view.js',
+            '/auriga/settings/ui.js',
+            '/auriga/settings/icons.js',
             '/auriga/shell-ui/overview.js',
             '/auriga/shell-ui/icons.js',
           ].includes(path));

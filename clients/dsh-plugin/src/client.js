@@ -4682,7 +4682,7 @@ window.__ModuleLoader__.load({
             });
           }
           const actions = [];
-          if (!signedIn) {
+          if (!signedIn && typeof onLogin === 'function') {
             actions.push(
               h(
                 Action,
@@ -4790,7 +4790,8 @@ window.__ModuleLoader__.load({
           const [shell, reloadShell, setShell] = useLocalStatus(
             'auriga/shell/status',
             4000,
-            local,
+            // Managed instances also expose shell status for overview connection state.
+            local || phase.boot?.mode === 'managed',
           );
           const [uac, reloadUac, setUac] = useLocalStatus(
             'auriga/uac/status',
@@ -5004,25 +5005,35 @@ window.__ModuleLoader__.load({
             panel(
               'overview',
               h(OverviewHome, {
-                shell: local ? shell : undefined,
+                shell,
                 uac: local ? uac : undefined,
                 desktop,
                 pendingCount: inboxBadge,
                 phase,
                 retry,
                 onNavigate: setTab,
-                onLogin: () => openPlatformLogin(),
-                onRetryLocal: () => {
-                  if (!shell?.csrf) return;
-                  postLocal('auriga/shell/command', shell.csrf, {
-                    action: 'retry_local_uac',
-                  })
-                    .catch(() => {})
-                    .finally(() => {
-                      reloadShell();
-                      reloadUac();
-                    });
-                },
+                onLogin: local
+                  ? () => {
+                      if (!openPlatformLogin())
+                        notify({
+                          level: 'warning',
+                          message: t('loginEntryUnavailable'),
+                        });
+                    }
+                  : undefined,
+                onRetryLocal: local
+                  ? () => {
+                      if (!shell?.csrf) return;
+                      postLocal('auriga/shell/command', shell.csrf, {
+                        action: 'retry_local_uac',
+                      })
+                        .catch(() => {})
+                        .finally(() => {
+                          reloadShell();
+                          reloadUac();
+                        });
+                    }
+                  : undefined,
               }),
             ),
             panel(tab === 'mine' ? 'market' : 'mine'),

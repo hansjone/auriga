@@ -48,7 +48,17 @@ export async function apply(ctx, config) {
   // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
-  installShellUi(ctx);
+  const localNativeAuth = {
+    requestRejection: (/** @type {any} */ req) =>
+      admission
+        ? admission.nativeAuth.requestRejection(req)
+        : ctx.connection.requestRejection(req),
+  };
+  installShellUi(
+    ctx,
+    config,
+    mode === 'managed' ? {} : { nativeAuth: localNativeAuth },
+  );
   const settings = installSettings(
     ctx,
     config,
@@ -63,12 +73,7 @@ export async function apply(ctx, config) {
           proxy: () => proxyController,
           broker: () => binding?.runtime.broker,
           networkControl: () => binding?.runtime.networkControl,
-          nativeAuth: {
-            requestRejection: (req) =>
-              admission
-                ? admission.nativeAuth.requestRejection(req)
-                : ctx.connection.requestRejection(req),
-          },
+          nativeAuth: localNativeAuth,
         },
   );
   if (mode !== 'managed') {

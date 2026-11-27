@@ -196,6 +196,7 @@ export function catalogRoutes(options) {
             (key === 'page' && !/^[1-9][0-9]*$/.test(value)) ||
             (key === 'search' && value.length > 200) ||
             (key === 'sort' &&
+              value !== '' &&
               ![
                 'publishedAt',
                 'installationCount',
@@ -206,6 +207,7 @@ export function catalogRoutes(options) {
           )
             refuse('common.validation_failed');
         }
+        if (params.get('sort') === '') params.delete('sort');
         const { value } = await api.request(
           '/api/resource/v1/catalog/' +
             pathname +

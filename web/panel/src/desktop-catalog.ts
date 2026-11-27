@@ -353,8 +353,14 @@ export class DesktopCatalog {
     return installations;
   }
 
+  private queuedWork?: (signal: AbortSignal) => Promise<void>;
+
   private async run(work: (signal: AbortSignal) => Promise<void>) {
-    if (this.loading || this.mutating || this.lifetime.signal.aborted) return;
+    if (this.mutating || this.lifetime.signal.aborted) return;
+    if (this.loading) {
+      this.queuedWork = work;
+      return;
+    }
     this.loading = true;
     this.error = undefined;
     this.emit();
@@ -372,7 +378,10 @@ export class DesktopCatalog {
       operation.abort();
       this.loading = false;
       this.schedulePluginPoll();
+      const next = this.queuedWork;
+      this.queuedWork = undefined;
       this.emit();
+      if (next && !lifetime.aborted) void this.run(next);
     }
   }
 

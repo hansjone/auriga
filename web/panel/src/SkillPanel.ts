@@ -72,10 +72,13 @@ export class SkillPanel {
     action: string;
     key: string;
     token: string;
+    kind: 'plugin' | 'skill';
   };
   private notice = '';
   private failed = false;
   private source = new Map<string, string>();
+  private searchTimer?: ReturnType<typeof setTimeout>;
+  private searchSeq = 0;
   constructor(
     private root: HTMLElement,
     private context: PanelContext,
@@ -95,6 +98,7 @@ export class SkillPanel {
   dispose() {
     this.desktop?.listeners.delete(this.syncDesktop);
     this.closeSortMenu(false);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
     this.epoch++;
     this.controller?.abort();
   }
@@ -140,6 +144,15 @@ export class SkillPanel {
       this.total = page.total;
       this.page = page.query.page;
       this.pageSize = page.query.pageSize;
+      const totalPages = Math.max(
+        1,
+        Math.ceil(page.total / page.query.pageSize),
+      );
+      if (page.query.page > totalPages) {
+        this.page = totalPages;
+        void this.load({ force: true });
+        return;
+      }
     } else if (snapshot) {
       const kinds = this.activeKinds();
       this.packages = kinds.flatMap((kind) => snapshot.market[kind].packages);
@@ -422,6 +435,11 @@ export class SkillPanel {
         this.packages = packages;
         this.total = value.total;
         this.cursor = undefined;
+        const totalPages = Math.max(1, Math.ceil(this.total / this.pageSize));
+        if (this.page > totalPages) {
+          this.page = totalPages;
+          return this.load({ force: true });
+        }
         const installed = await this.request('installations');
         if (epoch !== this.epoch) return;
         this.installationSnapshot(installed);
@@ -498,7 +516,7 @@ export class SkillPanel {
       if (
         !Array.isArray(value.items) ||
         value.items.some(
-          (v: Version) => v.kind !== this.kind || v.packageId !== pack.id,
+          (v: Version) => v.kind !== pack.kind || v.packageId !== pack.id,
         )
       )
         throw new Error('invalid');
@@ -513,9 +531,9 @@ export class SkillPanel {
     action: string,
     confirmation?: string,
     key: string = crypto.randomUUID(),
+    kind: 'plugin' | 'skill' = this.kind,
   ) {
-    if (this.kind === 'plugin' && this.desktop?.isTrackingPlugin(packageId))
-      return;
+    if (kind === 'plugin' && this.desktop?.isTrackingPlugin(packageId)) return;
     void this.run(async () => {
       this.confirmation = undefined;
       const old = this.rows.find(
@@ -530,7 +548,7 @@ export class SkillPanel {
         ...(confirmation ? { confirmation } : {}),
       };
       const result = this.desktop
-        ? await this.desktop.act(input, this.kind)
+        ? await this.desktop.act(input, kind)
         : await this.request('actions', input);
       if (result.confirmationRequired) {
         this.confirmation = {
@@ -539,6 +557,7 @@ export class SkillPanel {
           action,
           key,
           token: result.confirmation,
+          kind,
         };
         this.notice =
           this.text(
@@ -555,7 +574,7 @@ export class SkillPanel {
         return;
       }
       this.notice =
-        this.kind === 'plugin' && this.desktop
+        kind === 'plugin' && this.desktop
           ? ''
           : this.text(
               '已接受请求，等待实际安装回报。关闭或卸载后请新建会话。',
@@ -584,9 +603,9 @@ export class SkillPanel {
         !Array.isArray(value.items) ||
         value.items.length > 200 ||
         value.items.some(
-          (v: Version) => v.kind !== this.kind || v.packageId !== pack.id,
+          (v: Version) => v.kind !== pack.kind || v.packageId !== pack.id,
         ) ||
-        (this.kind === 'skill' &&
+        (pack.kind === 'skill' &&
           value.nextCursor &&
           value.nextCursor === cursor)
       )
@@ -736,14 +755,18 @@ export class SkillPanel {
       if (this.search === search.value) return;
       this.search = search.value;
       this.page = 1;
+      if (this.searchTimer) clearTimeout(this.searchTimer);
+      const seq = ++this.searchSeq;
       const { selectionStart, selectionEnd } = search;
-      void this.load().then(() => {
-        const updated = this.root.querySelector<HTMLInputElement>(
-          'input[type=search]',
-        );
-        updated?.focus();
-        updated?.setSelectionRange(selectionStart, selectionEnd);
-      });
+      this.searchTimer = setTimeout(() => {
+        void this.load({ force: true }).then(() => {
+          if (seq !== this.searchSeq) return;
+          const updated =
+            this.root.querySelector<HTMLInputElement>('input[type=search]');
+          updated?.focus();
+          updated?.setSelectionRange(selectionStart, selectionEnd);
+        });
+      }, 300);
     };
     search.oninput = (event) => {
       if (!(event as InputEvent).isComposing) searchChanged();
@@ -952,8 +975,14 @@ export class SkillPanel {
       button.className = 'market-pager-page';
       button.textContent = String(item);
       button.disabled = this.pending;
-      button.setAttribute('aria-label', this.text('第 ' + item + ' 页', 'Page ' + item));
-      button.setAttribute('aria-current', item === this.page ? 'page' : 'false');
+      button.setAttribute(
+        'aria-label',
+        this.text('第 ' + item + ' 页', 'Page ' + item),
+      );
+      button.setAttribute(
+        'aria-current',
+        item === this.page ? 'page' : 'false',
+      );
       button.onclick = () => this.goToPage(item);
       pages.append(button);
     }
@@ -1032,7 +1061,7 @@ export class SkillPanel {
     return button;
   }
 
-  /** List shows one install/update action; open() remains for version detail. */
+  /** List keeps install/update; card body opens version detail for permissions. */
   private marketPrimaryButton(
     pack: Package,
     row: Installation | undefined,
@@ -1050,7 +1079,15 @@ export class SkillPanel {
         : this.text('安装', 'Install');
     const button = this.button(
       label,
-      () => this.action(pack.id, defaultId, 'install'),
+      () =>
+        this.action(
+          pack.id,
+          defaultId,
+          'install',
+          undefined,
+          undefined,
+          this.resourceKind(pack),
+        ),
       !this.sharedAvailable ||
         this.pluginInProgress(pack.id, row, defaultId) ||
         (version && version.state !== 'published'),
@@ -1060,8 +1097,12 @@ export class SkillPanel {
     return button;
   }
 
+  private resourceKind(pack: Package): 'plugin' | 'skill' {
+    return pack.kind === 'plugin' ? 'plugin' : 'skill';
+  }
+
   private packLabel(pack: Package) {
-    return pack.kind === 'plugin'
+    return this.resourceKind(pack) === 'plugin'
       ? this.text('插件', 'Plugin')
       : this.text('技能', 'Skill');
   }
@@ -1285,7 +1326,15 @@ export class SkillPanel {
           this.retryPluginInstall(installed, version.id)
             ? this.text('重试此版本', 'Retry this version')
             : this.text('安装此精确版本', 'Install this exact version'),
-          () => this.action(pack.id, version.id, 'install'),
+          () =>
+            this.action(
+              pack.id,
+              version.id,
+              'install',
+              undefined,
+              undefined,
+              this.resourceKind(pack),
+            ),
           version.state !== 'published' ||
             !this.sharedAvailable ||
             this.pluginInProgress(pack.id, installed, version.id),
@@ -1425,9 +1474,32 @@ export class SkillPanel {
           const version = this.summaries.get(pack.id),
             row = this.installation(pack.id);
           const card = element('article', undefined, 'card resource-card');
+          card.tabIndex = 0;
+          card.setAttribute(
+            'aria-label',
+            this.text(
+              '查看 ' + pack.name + ' 的版本与权限',
+              'Review versions and permissions for ' + pack.name,
+            ),
+          );
+          const openDetails = () => void this.open(pack);
+          card.onclick = (event) => {
+            if ((event.target as HTMLElement).closest('button,a,input')) return;
+            openDetails();
+          };
+          card.onkeydown = (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if ((event.target as HTMLElement).closest('button,a,input')) return;
+            event.preventDefault();
+            openDetails();
+          };
           const top = element('div', undefined, 'resource-card-top');
           top.append(
-            resourceHeading(pack.name, pack.kind, this.packLabel(pack)),
+            resourceHeading(
+              pack.name,
+              this.resourceKind(pack),
+              this.packLabel(pack),
+            ),
           );
           const shownVersion = version?.version ?? pack.market?.version;
           if (shownVersion)
@@ -1520,6 +1592,7 @@ export class SkillPanel {
               pending.action,
               pending.token,
               pending.key,
+              pending.kind,
             ),
         ),
       );

@@ -91,7 +91,8 @@ const host = surfaceHost(
         { detail: 'private-detail' },
         { status: authorizationStatus },
       );
-    if (path === `${base}/packages`) return Response.json({ items: [item] });
+    if (path === `${base}/packages`)
+      return Response.json({ items: [item], total: 1 });
     if (path === `${base}/packages/${packageId}/versions/${versionId}`)
       return Response.json(version);
     if (path === `${base}/packages/${packageId}/versions`)
@@ -173,14 +174,14 @@ try {
     'unavailable shared installation explains setup is required',
   );
   assert.equal(
-    card.querySelector('.resource-card-footer .primary').disabled,
+    card.querySelector('.resource-card-footer .secondary').disabled,
     true,
     'unavailable shared installation must keep install disabled',
   );
   assert.deepEqual(
     calls.map((call) => call.url.pathname + call.url.search),
     [
-      `${base}/packages?limit=50&kind=plugin`,
+      `${base}/packages?limit=12&page=1&kind=plugin`,
       `${base}/installations`,
       `${base}/packages/${packageId}/versions/${versionId}`,
     ],
@@ -191,7 +192,7 @@ try {
   );
   assert.ok(
     ['Install', 'Update'].includes(
-      card.querySelector('.resource-card-footer .primary').textContent,
+      card.querySelector('.resource-card-footer .secondary').textContent,
     ),
   );
   // Even an explicit caller override cannot switch the managed adapter to cookies.

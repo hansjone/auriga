@@ -1,18 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSettingsView } from '../../src/settings/view.js';
-
-function nodes(tree) {
-  if (!tree || typeof tree !== 'object') return [];
-  return [tree, ...(tree.children ?? []).flatMap(nodes)];
-}
+import { SETTINGS_CATEGORY_KEY } from '../../src/settings/ui.js';
 
 function text(tree) {
   if (typeof tree === 'string') return tree;
   return (tree?.children ?? []).map(text).join(' ');
 }
 
-test('settings view no longer mounts private skills UI', () => {
+test('settings view mounts private skills UI', () => {
+  const memory = new Map([[SETTINGS_CATEGORY_KEY, 'skills']]);
+  globalThis.sessionStorage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
   let cursor = 0;
   const values = [];
   const React = {
@@ -29,7 +31,8 @@ test('settings view no longer mounts private skills UI', () => {
     },
     useState(initial) {
       const i = cursor++;
-      if (!(i in values)) values[i] = initial;
+      if (!(i in values))
+        values[i] = typeof initial === 'function' ? initial() : initial;
       return [values[i], () => {}];
     },
     useEffect() {},
@@ -47,13 +50,8 @@ test('settings view no longer mounts private skills UI', () => {
     },
   });
   const tree = Settings({ locale: 'zh' });
-  assert.equal(
-    nodes(tree).some(
-      (node) =>
-        typeof node.type === 'function' &&
-        node.type.name === 'PrivateSkillsView',
-    ),
-    false,
-  );
-  assert.doesNotMatch(text(tree), /私有技能|Private skills|SKILL\.md/);
+  const body = text(tree);
+  assert.match(body, /私有技能/);
+  assert.match(body, /SKILL\.md/);
+  assert.match(body, /新建／导入|刷新/);
 });

@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { installShellUi } from '../../src/shell/host.js';
+import {
+  createShellUiHandler,
+  installShellUi,
+} from '../../src/shell/host.js';
 import { createOverviewUI } from '../../src/shell/overview.js';
 
-test('installShellUi serves overview and icons modules', async () => {
+test('installShellUi serves overview and icons modules when admitted', async () => {
   const registrations = [];
   const ctx = {
     inject(_deps, fn) {
       return fn({
         profileContext: { dir: '/tmp/auriga-shell-ui-test' },
+        connection: { requestRejection() {} },
         effect(setup) {
           return setup();
         },
@@ -26,15 +30,23 @@ test('installShellUi serves overview and icons modules', async () => {
   assert.equal(registrations.length, 1);
   assert.equal(registrations[0].path, '/auriga/shell-ui');
   const handler = registrations[0].handler;
-  const capture = async (path) => {
-    /** @type {{status?:number,headers?:Record<string,string>,body?:Buffer}} */
+  const capture = async (path, headers = {}) => {
+    /** @type {{status?:number,headers?:Record<string,string>,body?:Buffer|string}} */
     const out = {};
     await handler(
-      { method: 'GET', url: path },
       {
-        writeHead(status, headers) {
+        method: 'GET',
+        url: path,
+        headers: { host: '127.0.0.1:18789', ...headers },
+        rawHeaders: Object.entries({
+          host: '127.0.0.1:18789',
+          ...headers,
+        }).flatMap(([k, v]) => [k, v]),
+      },
+      {
+        writeHead(status, responseHeaders) {
           out.status = status;
-          out.headers = headers;
+          out.headers = responseHeaders;
         },
         end(body) {
           out.body = body;
@@ -52,6 +64,69 @@ test('installShellUi serves overview and icons modules', async () => {
   assert.match(String(icons.body), /createAurigaIcons/);
   const missing = await capture('/auriga/shell-ui/missing.js');
   assert.equal(missing.status, 404);
+});
+
+test('shell-ui rejects unauthenticated and cross-origin requests', async () => {
+  const denied = createShellUiHandler({
+    auth: {
+      requestRejection() {
+        return 401;
+      },
+    },
+  });
+  /** @type {{status?:number,body?:string}} */
+  const authOut = {};
+  await denied(
+    {
+      method: 'GET',
+      url: '/auriga/shell-ui/overview.js',
+      headers: { host: '127.0.0.1:18789' },
+      rawHeaders: ['host', '127.0.0.1:18789'],
+    },
+    {
+      writeHead(status) {
+        authOut.status = status;
+      },
+      end(body) {
+        authOut.body = String(body);
+      },
+    },
+  );
+  assert.equal(authOut.status, 401);
+  assert.match(authOut.body ?? '', /auth/);
+
+  const gated = createShellUiHandler({
+    auth: { requestRejection() {} },
+    uiOrigin: 'https://ui.example',
+  });
+  /** @type {{status?:number,body?:string}} */
+  const originOut = {};
+  await gated(
+    {
+      method: 'GET',
+      url: '/auriga/shell-ui/overview.js',
+      headers: {
+        host: '127.0.0.1:18789',
+        origin: 'https://evil.example',
+      },
+      rawHeaders: [
+        'host',
+        '127.0.0.1:18789',
+        'origin',
+        'https://evil.example',
+      ],
+    },
+    {
+      writeHead(status) {
+        originOut.status = status;
+      },
+      end(body) {
+        originOut.body = String(body);
+      },
+    },
+  );
+  assert.equal(originOut.status, 403);
+  assert.match(originOut.body ?? '', /forbidden/);
 });
 
 test('createOverviewUI renders welcome and capability routes', () => {
