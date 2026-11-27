@@ -30,6 +30,10 @@ import {
 import { sign, generateKeyPairSync } from 'node:crypto';
 import { parse as parseVersion } from '../../clients/installer/runtime/semver-lite.mjs';
 import {
+  readBoundedJsonFile,
+  validateProxyConfig,
+} from '../../clients/installer/runtime/network-proxy.mjs';
+import {
   validateResourceRoots,
   validateUacConfigDir,
   build,
@@ -192,6 +196,12 @@ export function validateBuildOptions(o) {
     physical(o['uac-config-dir']);
     validateUacConfigDir(o['uac-config-dir']);
   }
+  if (o['default-proxy-file']) {
+    physical(o['default-proxy-file']);
+    validateProxyConfig(readBoundedJsonFile(o['default-proxy-file']), null, {
+      allowCredentials: false,
+    });
+  }
   return unsigned;
 }
 export function resolveBuildPaths(options) {
@@ -205,6 +215,7 @@ export function resolveBuildPaths(options) {
     'release-public-key',
     'resource-trust-json',
     'uac-config-dir',
+    'default-proxy-file',
     'verify-key',
   ])
     if (options[key]) options[key] = resolve(options[key]);
@@ -504,6 +515,9 @@ export async function buildWorker(optionsFile, hooks = {}) {
     'release-public-key': o['release-public-key'],
     'resource-trust-json': o['resource-trust-json'],
     ...(o['uac-config-dir'] ? { 'uac-config-dir': o['uac-config-dir'] } : {}),
+    ...(o['default-proxy-file']
+      ? { 'default-proxy-file': o['default-proxy-file'] }
+      : {}),
     ...(o['platform-origin']
       ? {
           'platform-origin': o['platform-origin'],

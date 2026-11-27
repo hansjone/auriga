@@ -21,7 +21,7 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,networkControl?:()=>any,broker?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,proxy?:()=>any,networkControl?:()=>any,broker?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
@@ -29,6 +29,7 @@ export function installSettings(
     uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
     activeOrigin,
     desktop,
+    proxy,
     networkControl,
     broker,
     nativeAuth,
@@ -69,6 +70,7 @@ export function installSettings(
           handler: createSettingsHandler({
             store,
             desktop,
+            proxy,
             networkControl,
             broker,
             mode,
@@ -90,10 +92,11 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,networkControl?:()=>any,broker?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,proxy?:()=>any,networkControl?:()=>any,broker?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
 export function createSettingsHandler({
   store,
   desktop,
+  proxy,
   auth,
   activeOrigin,
   deviceName = null,
@@ -107,6 +110,7 @@ export function createSettingsHandler({
   const snapshot = () => ({
     ...store.snapshot(),
     ...(desktop?.() ? { desktop: desktop().status() } : {}),
+    ...(mode !== 'managed' && proxy?.() ? { proxy: proxy().snapshot() } : {}),
     mode,
     activeOrigin:
       typeof activeOrigin === 'function' ? activeOrigin() : activeOrigin,
@@ -293,13 +297,19 @@ export function createSettingsHandler({
         }
       }
       if (mode === 'managed') return json(403, { reason: 'managed' });
+      const proxyPath = [
+        '/auriga/settings/proxy',
+        '/auriga/settings/proxy/reset',
+        '/auriga/settings/proxy/test',
+      ].includes(path ?? '');
       if (
         !write ||
-        ![
-          '/auriga/settings/save',
-          '/auriga/settings/test',
-          '/auriga/settings/desktop',
-        ].includes(path ?? '')
+        (!proxyPath &&
+          ![
+            '/auriga/settings/save',
+            '/auriga/settings/test',
+            '/auriga/settings/desktop',
+          ].includes(path ?? ''))
       )
         return json(404, { reason: 'missing' });
       if (
@@ -308,11 +318,13 @@ export function createSettingsHandler({
         req.headers['x-auriga-settings'] !== '1'
       )
         return json(403, { reason: 'forbidden' });
+      const maxBodyBytes = proxyPath ? 32768 : 4096;
       const parts = [];
       let length = 0;
       for await (const part of req) {
         length += part.length;
-        if (length > 4096) return json(413, { reason: 'invalidSettings' });
+        if (length > maxBodyBytes)
+          return json(413, { reason: 'invalidSettings' });
         parts.push(part);
       }
       let input;
@@ -320,6 +332,25 @@ export function createSettingsHandler({
         input = JSON.parse(Buffer.concat(parts).toString('utf8'));
       } catch {
         return json(400, { reason: 'invalidSettings' });
+      }
+      if (proxyPath) {
+        const controller = proxy?.();
+        if (!controller) return json(503, { reason: 'unavailable' });
+        if (path === '/auriga/settings/proxy/reset') {
+          controller.reset();
+          return json(200, snapshot());
+        }
+        if (path === '/auriga/settings/proxy/test') {
+          if (
+            !input ||
+            typeof input !== 'object' ||
+            typeof input.url !== 'string'
+          )
+            return json(400, { reason: 'invalidTarget' });
+          return json(200, await controller.test(input.url));
+        }
+        controller.save(input);
+        return json(200, snapshot());
       }
       if (path === '/auriga/settings/desktop') {
         const updater = desktop?.();
@@ -355,21 +386,21 @@ export function createSettingsHandler({
       await store.save(input);
       return json(200, snapshot());
     } catch (error) {
-      const reason = error instanceof Error ? error.message : '';
-      return json(
-        ['invalidOrigin', 'httpsRequired', 'invalidSettings'].includes(reason)
-          ? 400
-          : 503,
-        {
-          reason: [
-            'invalidOrigin',
-            'httpsRequired',
-            'invalidSettings',
-          ].includes(reason)
-            ? reason
-            : 'unavailable',
-        },
-      );
+      const code =
+        /** @type {{code?:string}} */ (error)?.code ??
+        (error instanceof Error ? error.message : '');
+      const clientCodes = [
+        'invalidOrigin',
+        'httpsRequired',
+        'invalidSettings',
+        'invalidProxyUrl',
+        'invalidPattern',
+        'invalidTarget',
+        'proxy_loop',
+      ];
+      return json(clientCodes.includes(code) ? 400 : 503, {
+        reason: clientCodes.includes(code) ? code : 'unavailable',
+      });
     }
   };
 }

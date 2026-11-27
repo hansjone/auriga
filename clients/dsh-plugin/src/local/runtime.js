@@ -37,7 +37,7 @@ const refuse = (code = 'common.unavailable') => {
  * The encrypted legacy vault is used only for local state; old platform material
  * cannot be replayed. No import operation exists, so migration safely requires
  * a fresh shell login and removes only old authentication fields.
- * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string},signal?:AbortSignal,authorizeLocal?:(context:any)=>Promise<boolean>,localUac?:any}} options */
+ * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string},signal?:AbortSignal,authorizeLocal?:(context:any)=>Promise<boolean>,localUac?:any,proxyController?:any}} options */
 export async function createConnectRuntime({
   config,
   directory,
@@ -48,6 +48,7 @@ export async function createConnectRuntime({
   signal,
   authorizeLocal,
   localUac,
+  proxyController,
 }) {
   config = Object.freeze({
     ...config,
@@ -112,9 +113,10 @@ export async function createConnectRuntime({
       () => undefined,
     ));
   const desktop = config.platformOrigin
-    ? await desktopUpdater({ origin: config.platformOrigin }).catch(
-        desktopStartupFailure,
-      )
+    ? await desktopUpdater({
+        origin: config.platformOrigin,
+        proxyController,
+      }).catch(desktopStartupFailure)
     : undefined;
   const broker = await createBroker({
     signal,

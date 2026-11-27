@@ -1,6 +1,7 @@
 // Reuse the existing tested protocol/transport implementations. buildBroker
 // bundles this seam into the standalone artifact; no plugin import at runtime.
 export { NatsLink } from '../dsh-plugin/src/network/transport/nats-link.js';
+export { createWsSocketFactory } from '../dsh-plugin/src/network/transport/ws-socket.js';
 export {
   createDeviceProvider,
   verifyControlReceiptRecord,

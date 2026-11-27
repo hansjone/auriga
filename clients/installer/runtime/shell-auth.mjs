@@ -23,6 +23,8 @@ export async function startShellAuth({
   root,
   dataHome,
   dir,
+  fetcher,
+  resolveWsAgent,
   onFailure = () => {},
 }) {
   const directory = join(dir, 'auriga', 'shell-auth');
@@ -33,6 +35,8 @@ export async function startShellAuth({
     const auth = await startDesktopAuth({
       root,
       dataHome,
+      ...(fetcher ? { fetcher } : {}),
+      ...(resolveWsAgent ? { resolveWsAgent } : {}),
     });
     if (!auth) onFailure('not_configured');
     return auth;

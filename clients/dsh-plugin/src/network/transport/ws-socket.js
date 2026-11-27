@@ -11,6 +11,7 @@ import { normalizeOrigin } from '../../settings/store.js';
  *   ca?: string | Buffer | Array<string | Buffer>,
  *   rejectUnauthorized?: boolean,
  *   origin?: string,
+ *   resolveAgent?: (url: string, tlsOpts: { ca?: any, rejectUnauthorized?: boolean }) => any,
  * }} [tls]
  * @returns {(url: string) => import('ws').WebSocket}
  */
@@ -28,11 +29,16 @@ export function createWsSocketFactory(tls = {}) {
       trace_id: parent.slice(3, 35),
       path: new URL(url).pathname,
     });
+    const agent = tls.resolveAgent?.(url, {
+      ...(tls.ca !== undefined ? { ca: tls.ca } : {}),
+      rejectUnauthorized,
+    });
     return new WebSocket(url, {
       headers: { traceparent: parent },
       rejectUnauthorized,
       ...(tls.ca !== undefined ? { ca: tls.ca } : {}),
       ...(origin !== undefined ? { origin } : {}),
+      ...(agent !== undefined ? { agent } : {}),
     });
   };
 }

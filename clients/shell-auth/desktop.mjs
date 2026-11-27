@@ -58,6 +58,8 @@ export async function startDesktopAuth({
   dataHome,
   openBrowser = openSystemBrowser,
   onSkipLogin,
+  fetcher = globalThis.fetch,
+  resolveWsAgent,
 }) {
   const originFile = safePath(join(root, 'desktop-origin.json'));
   if (!existsSync(originFile)) return undefined;
@@ -84,6 +86,7 @@ export async function startDesktopAuth({
           nativeClientId: installation.nativeClientId,
           network: installation.network,
         }),
+        fetcher,
       ),
       vault,
       openBrowser,
@@ -93,7 +96,7 @@ export async function startDesktopAuth({
     loopback = await createLoopback({ broker, validate: valid, onSkipLogin });
     business = new BusinessProxy(
       broker,
-      globalThis.fetch,
+      fetcher,
       privateDirectory(
         join(dataHome, 'auriga', 'shell-auth', 'uploads'),
         helper,
@@ -105,6 +108,7 @@ export async function startDesktopAuth({
         ),
         readConfig: () =>
           JSON.parse(readFileSync(safePath(originFile), 'utf8')),
+        ...(resolveWsAgent ? { resolveWsAgent } : {}),
       },
     );
     ipc = await startIpc({ helper, broker, business });
