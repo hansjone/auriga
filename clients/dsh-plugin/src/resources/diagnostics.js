@@ -34,8 +34,57 @@ const reasons = new Set([
   'not_found',
   'rate_limited',
   'apply_failed',
+  'plugin_install_network',
+  'plugin_install_timeout',
+  'plugin_install_dependency',
+  'plugin_install_disk_full',
+  'plugin_install_permission',
+  'plugin_install_build_blocked',
+  'plugin_install_incompatible',
+  'plugin_install_cancelled',
+  'plugin_not_active',
   'internal_error',
 ]);
+const nativeInstallReasons = new Map([
+  ['network', 'plugin_install_network'],
+  ['timeout', 'plugin_install_timeout'],
+  ['not-found', 'plugin_install_dependency'],
+  ['no-matching-version', 'plugin_install_dependency'],
+  ['disk-full', 'plugin_install_disk_full'],
+  ['permission', 'plugin_install_permission'],
+  ['build-blocked', 'plugin_install_build_blocked'],
+  ['integrity', 'signature_invalid'],
+  ['pnpm-missing', 'installer_unavailable'],
+]);
+
+/** Classify the public DSH result without copying pnpm output, paths or URLs.
+ * @param {any} outcome @param {string} phase @param {string} [requestId] */
+export function nativePluginFailure(outcome, phase, requestId) {
+  const reason =
+    outcome?.application === 'cancelled'
+      ? 'plugin_install_cancelled'
+      : outcome?.error?.code === 'incompatible-version'
+        ? 'plugin_install_incompatible'
+        : (nativeInstallReasons.get(outcome?.packageResult?.kind) ??
+          'apply_failed');
+  return Object.assign(
+    resourceFailure('resource.apply_failed', reason, 'plugin'),
+    {
+      nativePluginOperation: true,
+      phase,
+      traceId: requestId?.replaceAll('-', ''),
+    },
+  );
+}
+
+/** @param {any} value */
+export function validPluginDiagnostic(value) {
+  return (
+    !!value &&
+    reasons.has(value.reason) &&
+    /^[a-f0-9]{32}$/.test(value.trace_id ?? '')
+  );
+}
 const stages = new Set([
   'catalog',
   'policy_cache',
@@ -122,7 +171,9 @@ export function diagnoseResource(error, stage, log = logEvent) {
                   : ['platform', 'download'].includes(stage)
                     ? 'platform_unreachable'
                     : 'internal_error';
-  const trace_id = newTraceparent().slice(3, 35);
+  const trace_id = /^[a-f0-9]{32}$/.test(error?.traceId ?? '')
+    ? error.traceId
+    : newTraceparent().slice(3, 35);
   const body = { code, reason, stage, trace_id };
   // Only finite metadata: exception messages/stacks may contain resource content or credentials.
   log('WARN', 'Resource operation failed', {

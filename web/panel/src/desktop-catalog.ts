@@ -16,6 +16,13 @@ import type {
 type HostFetch = NonNullable<PanelContext['fetch']>;
 type CatalogScope = NonNullable<PanelContext['catalogSession']>;
 type Kind = 'plugin' | 'skill';
+type Action = { packageId: string; versionId: string; revision: number };
+type PluginOperation = {
+  packageId: string;
+  versionId: string;
+  phase: string;
+  attempt?: { index: number; total: number };
+};
 
 export interface InstallationSnapshot {
   identity?: { ownerId: string; tenantId: string };
@@ -149,8 +156,13 @@ export class DesktopCatalog {
   error?: unknown;
   loading = false;
   mutating = false;
+  pluginOperation?: PluginOperation;
   private started = false;
   private lifetime = new AbortController();
+  private progressTimer?: ReturnType<typeof setTimeout>;
+  private installationPoll = false;
+  private pollUntil = 0;
+  private pendingPlugin?: Action;
   constructor(
     private fetch: HostFetch,
     private scope: CatalogScope,
@@ -161,28 +173,158 @@ export class DesktopCatalog {
   }
 
   dispose() {
-    this.lifetime.abort();
-    this.snapshot = undefined;
-    this.versions.clear();
+    this.clear();
     this.emit();
     this.listeners.clear();
   }
 
   rejectAuth(error: unknown) {
-    this.lifetime.abort();
+    this.clear();
     this.lifetime = new AbortController();
-    this.snapshot = undefined;
-    this.versions.clear();
     this.error = error;
     this.emit();
+  }
+
+  private clear() {
+    this.lifetime.abort();
+    clearTimeout(this.progressTimer);
+    this.progressTimer = undefined;
+    this.pollUntil = 0;
+    this.pluginOperation = undefined;
+    this.pendingPlugin = undefined;
+    this.snapshot = undefined;
+    this.versions.clear();
   }
 
   private emit() {
     for (const listener of this.listeners) listener();
   }
 
+  private get waitingForPlugin() {
+    return this.snapshot?.installations.items.some(
+      (row) =>
+        row.resource.identity.kind === 'plugin' && row.state === 'applying',
+    );
+  }
+
+  isTrackingPlugin(packageId: string) {
+    return this.pendingPlugin?.packageId === packageId;
+  }
+
+  private get trackingPlugin() {
+    return this.pendingPlugin || this.waitingForPlugin || this.pluginOperation;
+  }
+
+  private readPluginSelection(installations: InstallationSnapshot) {
+    const selection = this.pendingPlugin;
+    if (
+      selection &&
+      installations.items.some(
+        (row) =>
+          row.resource.identity.packageId === selection.packageId &&
+          row.resource.identity.versionId === selection.versionId &&
+          row.installationRevision > selection.revision,
+      )
+    )
+      this.pendingPlugin = undefined;
+  }
+
+  private schedulePluginPoll() {
+    const signal = this.lifetime.signal;
+    if (
+      this.progressTimer ||
+      signal.aborted ||
+      !this.pollUntil ||
+      !this.trackingPlugin
+    )
+      return;
+    this.progressTimer = setTimeout(async () => {
+      await this.pollPlugins(signal);
+      if (!signal.aborted) {
+        this.progressTimer = undefined;
+        this.schedulePluginPoll();
+      }
+    }, 1000);
+  }
+
+  private async pollPlugins(signal: AbortSignal) {
+    if (signal.aborted || !this.trackingPlugin) return;
+    if (Date.now() >= this.pollUntil) {
+      this.pollUntil = 0;
+      if (this.pendingPlugin)
+        this.error ??= new ResourceDiagnosticError('platform_unreachable');
+      this.pendingPlugin = undefined;
+      this.pluginOperation = undefined;
+      this.emit();
+      return;
+    }
+    try {
+      const { operation } = await this.get('plugin-progress', signal);
+      if (signal.aborted) return;
+      if (operation) this.pollUntil = Date.now() + 300000;
+      if (
+        JSON.stringify(this.pluginOperation ?? null) !==
+        JSON.stringify(operation)
+      ) {
+        this.pluginOperation = operation ?? undefined;
+        this.emit();
+      }
+      if (
+        !operation &&
+        !this.mutating &&
+        (this.pendingPlugin || this.waitingForPlugin) &&
+        !this.installationPoll
+      ) {
+        const before = this.snapshot;
+        this.installationPoll = true;
+        void this.readInstallations(signal)
+          .then((installations) => {
+            if (
+              !signal.aborted &&
+              before &&
+              this.snapshot === before &&
+              !this.loading &&
+              !this.mutating
+            ) {
+              const wasChecking = !!this.pendingPlugin;
+              this.readPluginSelection(installations);
+              if (
+                wasChecking !== !!this.pendingPlugin ||
+                JSON.stringify(before.installations) !==
+                  JSON.stringify(installations)
+              ) {
+                this.snapshot = { ...before, installations };
+                this.emit();
+              }
+            }
+          })
+          .catch((error) => {
+            if (!signal.aborted && catalogStatus(error) === 401)
+              this.rejectAuth(error);
+          })
+          .finally(() => {
+            this.installationPoll = false;
+          });
+      }
+    } catch (error) {
+      if (!signal.aborted && catalogStatus(error) === 401)
+        this.rejectAuth(error);
+    }
+  }
+
   private get(path: string, signal: AbortSignal = this.lifetime.signal) {
     return catalogRequest(this.fetch, path, signal, undefined, this.scope);
+  }
+
+  private async readInstallations(signal: AbortSignal) {
+    const installations = validateInstallations(
+      await this.get('installations', signal),
+    );
+    if (installations.identity?.ownerId !== this.scope.ownerId)
+      throw Object.assign(new ResourceDiagnosticError('unauthenticated'), {
+        status: 401,
+      });
+    return installations;
   }
 
   private async run(work: (signal: AbortSignal) => Promise<void>) {
@@ -205,6 +347,7 @@ export class DesktopCatalog {
     } finally {
       operation.abort();
       this.loading = false;
+      this.schedulePluginPoll();
       this.emit();
     }
   }
@@ -269,12 +412,8 @@ export class DesktopCatalog {
       const [plugin, skill, installations] = await Promise.all([
         allPluginPackages((cursor) => this.packages('plugin', signal, cursor)),
         this.packages('skill', signal),
-        this.get('installations', signal).then(validateInstallations),
+        this.readInstallations(signal),
       ]);
-      if (installations.identity?.ownerId !== this.scope.ownerId)
-        throw Object.assign(new ResourceDiagnosticError('unauthenticated'), {
-          status: 401,
-        });
       const packages = [...plugin.packages, ...skill.packages];
       if (new Set(packages.map((pack) => pack.id)).size !== packages.length)
         throw new Error('invalid');
@@ -294,6 +433,8 @@ export class DesktopCatalog {
         },
         installations,
       };
+      this.readPluginSelection(installations);
+      if (this.waitingForPlugin) this.pollUntil = Date.now() + 300000;
     });
   }
 
@@ -381,18 +522,40 @@ export class DesktopCatalog {
     });
   }
 
-  async act(body: unknown) {
+  async act<T extends Action>(body: T, kind: Kind) {
+    if (kind === 'plugin' && this.pendingPlugin) throw new Error('unavailable');
     return this.mutate(async (signal) => {
-      const result = await catalogRequest(
-        this.fetch,
-        'actions',
-        signal,
-        body,
-        this.scope,
-      );
-      if (!signal.aborted && result.installation)
-        this.updateInstallation(result.installation);
-      return result;
+      if (kind === 'plugin') {
+        this.pendingPlugin = body;
+        this.pollUntil = Date.now() + 300000;
+        this.schedulePluginPoll();
+      }
+      try {
+        const result = await catalogRequest(
+          this.fetch,
+          'actions',
+          signal,
+          body,
+          this.scope,
+        );
+        if (!signal.aborted) {
+          if (kind === 'plugin') this.pendingPlugin = undefined;
+          if (result.installation) this.updateInstallation(result.installation);
+        }
+        return result;
+      } catch (error) {
+        if (kind === 'plugin' && !signal.aborted) {
+          const status = catalogStatus(error);
+          if (status === undefined || status >= 500) {
+            // A lost response can still commit the selection. Keep polling by exact version.
+            this.pollUntil =
+              Date.now() + (this.pluginOperation ? 300000 : 30000);
+            return { awaitingResult: true };
+          }
+          this.pendingPlugin = undefined;
+        }
+        throw error;
+      }
     });
   }
 
@@ -413,6 +576,9 @@ export class DesktopCatalog {
       throw error;
     } finally {
       this.mutating = false;
+      if (!this.pendingPlugin && !this.waitingForPlugin)
+        this.pluginOperation = undefined;
+      this.schedulePluginPoll();
       this.emit();
     }
   }

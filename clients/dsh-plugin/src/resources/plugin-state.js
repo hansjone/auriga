@@ -6,6 +6,12 @@ import { canonicalize, parseStrictJson } from './json.js';
 import { exact, refuse, uuid } from './trust.js';
 import { requireSchema } from './schema.js';
 import { setTimeout as delay } from 'node:timers/promises';
+import { validPluginDiagnostic } from './diagnostics.js';
+
+const revisions = ['installationRevision', 'selectionRevision', 'generation'];
+/** @param {any} recorded @param {any} row */
+const sameRevision = (recorded, row) =>
+  !!recorded && revisions.every((key) => recorded[key] === row[key]);
 
 // Shared even across module reloads in one DSH process; a real restart changes it.
 const instanceKey = Symbol.for('auriga.catalog.plugin-process-instance');
@@ -22,6 +28,8 @@ export function pluginState({ home, who }) {
     ownerId: who.ownerId,
     hostId: who.hostId,
   };
+  /** @type {Map<string, any>} */
+  const recentFailures = new Map();
   /** @param {any} row */
   const proof = (row) => ({
     identity: row.resource.identity,
@@ -41,15 +49,19 @@ export function pluginState({ home, who }) {
       row.resource.identity.packageId + '.json',
     );
   }
-  /** @param {any} row @param {string} name */
-  function read(row, name) {
-    const path = file(row);
+  /** @param {string} path */
+  function readRecord(path) {
     assertLocalPath(path);
     if (!existsSync(path)) return undefined;
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.size > 65536)
       refuse('resource.storage_unavailable');
-    const value = parseStrictJson(readFileSync(path), true);
+    return parseStrictJson(readFileSync(path), true);
+  }
+  /** @param {any} row @param {string} name */
+  function read(row, name) {
+    const value = readRecord(file(row));
+    if (value === undefined) return undefined;
     if (
       !exact(value, [
         'schemaVersion',
@@ -100,16 +112,87 @@ export function pluginState({ home, who }) {
       ? value
       : undefined;
   }
+  /** @param {string} path @param {any} value */
+  async function commit(path, value) {
+    let lock;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        lock = acquireHostLock(home);
+        break;
+      } catch (error) {
+        if (/** @type {any} */ (error).code !== 'EEXIST' || attempt >= 3)
+          throw error;
+        await delay(25 * 2 ** attempt);
+      }
+    }
+    try {
+      assertLocalPath(path);
+      mkdirSync(dirname(path), { recursive: true });
+      lock.check();
+      durableJson(path, value);
+    } finally {
+      lock.release();
+    }
+  }
+
   return {
     read,
     /** @param {any} value @param {any} row */
     waiting(value, row) {
       return (
         value?.pending?.instance === instance &&
-        ['installationRevision', 'selectionRevision', 'generation'].every(
-          (k) => value.pending[k] === row[k],
-        )
+        sameRevision(value.pending, row)
       );
+    },
+    /** Keep diagnostic records separate from the proof format used by older clients.
+     * @param {any} row */
+    readFailure(row) {
+      const value =
+        recentFailures.get(row.resource.identity.packageId) ??
+        readRecord(file(row) + '.failure');
+      if (value === undefined) return undefined;
+      if (
+        !exact(value, [
+          'scope',
+          'phase',
+          'proof',
+          ...revisions,
+          'diagnostic',
+        ]) ||
+        !['prepare', 'host'].includes(value.phase) ||
+        canonicalize(value.scope) !== canonicalize(scope) ||
+        !revisions.every(
+          (key) => Number.isSafeInteger(value[key]) && value[key] >= 0,
+        ) ||
+        !exact(value.diagnostic, ['reason', 'trace_id']) ||
+        !validPluginDiagnostic(value.diagnostic)
+      )
+        refuse('resource.storage_unavailable');
+      return canonicalize(value.proof) === canonicalize(proof(row))
+        ? value
+        : undefined;
+    },
+    /** @param {any} value @param {any} row */
+    failure(value, row) {
+      return sameRevision(value, row) ? value.diagnostic : undefined;
+    },
+    /** @param {any} row @param {'prepare'|'host'} phase @param {{reason:string,trace_id:string}} diagnostic */
+    async writeFailure(row, phase, diagnostic) {
+      const packageId = row.resource.identity.packageId;
+      const record = {
+        scope,
+        phase,
+        proof: proof(row),
+        installationRevision: row.installationRevision,
+        selectionRevision: row.selectionRevision,
+        generation: row.generation,
+        diagnostic,
+      };
+      recentFailures.delete(packageId);
+      recentFailures.set(packageId, record);
+      const oldest = recentFailures.keys().next().value;
+      if (recentFailures.size > 128 && oldest) recentFailures.delete(oldest);
+      await commit(file(row) + '.failure', record);
     },
     /** Persist the public operation result before reporting or scheduling another attempt.
      * @param {any} row @param {string} name @param {boolean} installed @param {string|null} [action] */
@@ -132,26 +215,7 @@ export function pluginState({ home, who }) {
       };
       const prior = read(row, name);
       if (prior && canonicalize(prior) === canonicalize(value)) return;
-      let lock;
-      for (let attempt = 0; ; attempt++) {
-        try {
-          lock = acquireHostLock(home);
-          break;
-        } catch (error) {
-          if (/** @type {any} */ (error).code !== 'EEXIST' || attempt >= 3)
-            throw error;
-          await delay(25 * 2 ** attempt);
-        }
-      }
-      try {
-        const path = file(row);
-        assertLocalPath(path);
-        mkdirSync(dirname(path), { recursive: true });
-        lock.check();
-        durableJson(path, value);
-      } finally {
-        lock.release();
-      }
+      await commit(file(row), value);
     },
   };
 }

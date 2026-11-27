@@ -70,7 +70,9 @@ export function watchCatalogIdentity({
       .then(() => {
         if (!closed) return onChange?.({ changed });
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (!closed) diagnoseResource(error, 'catalog');
+      })
       .finally(() => {
         running = false;
       });
@@ -204,6 +206,10 @@ export function catalogRoutes(options) {
         return send(200, value);
       }
       const s = service(runtime, api.who);
+      if (!write && path === 'plugin-progress') {
+        api.check();
+        return send(200, { operation: s.pluginOperation?.() ?? null });
+      }
       if (!write && path === 'installations') {
         const result = await s.list();
         api.check();
@@ -250,7 +256,7 @@ export function catalogRoutes(options) {
             'confirmation',
           ]))
       )
-        result = await s.apply(input);
+        result = await s.apply(input, true);
       else if (path === 'observe' && exact(input, ['packageId', 'preset']))
         result = await s.observe(input.packageId, input.preset);
       else if (path === 'submission-targets' && exact(input, ['snapshotId']))
