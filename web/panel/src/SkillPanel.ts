@@ -101,6 +101,8 @@ export class SkillPanel {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchWrap = undefined;
     this.searchInput = undefined;
+    this.chromeEl = undefined;
+    this.marketCountEl = undefined;
     this.epoch++;
     this.controller?.abort();
   }
@@ -737,6 +739,8 @@ export class SkillPanel {
 
   private searchWrap?: HTMLElement;
   private searchInput?: HTMLInputElement;
+  private chromeEl?: HTMLElement;
+  private marketCountEl?: HTMLElement;
 
   private searchControl() {
     if (this.searchWrap && this.searchInput) {
@@ -872,6 +876,39 @@ export class SkillPanel {
     host.replaceChildren(this.refreshButton());
   }
 
+  private syncMarketChrome() {
+    if (!this.chromeEl) return;
+    for (const button of this.chromeEl.querySelectorAll<HTMLButtonElement>(
+      '.market-kind-filter',
+    )) {
+      const label = button.textContent ?? '';
+      const value =
+        label === this.text('全部', 'All')
+          ? 'all'
+          : label === this.text('插件', 'Plugins')
+            ? 'plugin'
+            : 'skill';
+      button.setAttribute('aria-pressed', String(this.kindFilter === value));
+      button.disabled = this.pending;
+    }
+    if (this.marketCountEl)
+      this.marketCountEl.textContent = this.text(
+        '共 ' + this.total + ' 个资源',
+        this.total + ' resources',
+      );
+    const refresh = this.chromeEl.querySelector<HTMLButtonElement>(
+      'button.resource-refresh',
+    );
+    if (refresh) refresh.disabled = this.pending;
+    const sort = this.chromeEl.querySelector<HTMLButtonElement>(
+      '.market-sort-trigger',
+    );
+    if (sort) {
+      sort.disabled = this.pending;
+      sort.setAttribute('aria-expanded', String(this.sortMenuOpen));
+    }
+  }
+
   private marketChrome() {
     const chrome = element('div', undefined, 'market-chrome');
     const toolbar = element('div', undefined, 'market-toolbar');
@@ -901,15 +938,14 @@ export class SkillPanel {
     const tools = element('div', undefined, 'market-toolbar-tools');
     tools.append(this.sortControl(), this.refreshButton());
     toolbar.append(kinds, tools);
-    chrome.append(
-      this.searchControl(),
-      toolbar,
-      element(
-        'p',
-        this.text('共 ' + this.total + ' 个资源', this.total + ' resources'),
-        'market-count',
-      ),
+    const count = element(
+      'p',
+      this.text('共 ' + this.total + ' 个资源', this.total + ' resources'),
+      'market-count',
     );
+    chrome.append(this.searchControl(), toolbar, count);
+    this.chromeEl = chrome;
+    this.marketCountEl = count;
     this.root.append(chrome);
   }
 
@@ -1146,14 +1182,31 @@ export class SkillPanel {
   }
 
   render() {
-    this.root.replaceChildren();
+    const marketList = !this.mine && !this.selected;
+    const keepChrome =
+      marketList &&
+      !!this.chromeEl &&
+      this.chromeEl.parentElement === this.root &&
+      !!this.searchInput &&
+      (document.activeElement === this.searchInput || !!this.searchTimer);
+    if (keepChrome) {
+      while (this.chromeEl!.nextSibling) this.chromeEl!.nextSibling.remove();
+      this.syncMarketChrome();
+    } else {
+      this.root.replaceChildren();
+      this.chromeEl = undefined;
+      this.marketCountEl = undefined;
+      if (!marketList) {
+        this.searchWrap = undefined;
+        this.searchInput = undefined;
+      }
+      if (marketList) this.marketChrome();
+      else if (this.mine && !this.actionsHost)
+        this.root.append(this.refreshButton());
+    }
     this.root.setAttribute('aria-busy', String(this.pending));
     this.headerActions();
-    const marketList = !this.mine && !this.selected;
     const displayed = marketList ? this.displayedMarketPackages() : [];
-    if (marketList) this.marketChrome();
-    else if (this.mine && !this.actionsHost)
-      this.root.append(this.refreshButton());
     if (this.policyCacheUnavailable)
       this.root.append(
         element(
@@ -1269,7 +1322,11 @@ export class SkillPanel {
           this.selected = undefined;
           this.render();
         }),
-        resourceHeading(pack.name, this.kind, this.label),
+        resourceHeading(
+          pack.name,
+          this.resourceKind(pack),
+          this.packLabel(pack),
+        ),
       );
       if (pack.market)
         this.root.append(

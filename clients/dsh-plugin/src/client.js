@@ -4787,13 +4787,13 @@ window.__ModuleLoader__.load({
             : ['127.0.0.1', '[::1]', 'localhost'].includes(
                 window.location.hostname,
               );
-          const [shell, reloadShell, setShell] = useLocalStatus(
+          const [shell, reloadShell] = useLocalStatus(
             'auriga/shell/status',
             4000,
             // Managed instances also expose shell status for overview connection state.
             local || phase.boot?.mode === 'managed',
           );
-          const [uac, reloadUac, setUac] = useLocalStatus(
+          const [uac, reloadUac] = useLocalStatus(
             'auriga/uac/status',
             15000,
             local,

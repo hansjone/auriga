@@ -42,7 +42,12 @@ export default [
     },
   },
   {
-    files: ['src/client.js', 'src/login/**/*.js'],
+    files: [
+      'src/client.js',
+      'src/login/**/*.js',
+      'src/settings/**/*.js',
+      'src/shell/**/*.js',
+    ],
     languageOptions: {
       globals: {
         window: 'readonly',
@@ -52,6 +57,10 @@ export default [
         setTimeout: 'readonly',
         console: 'readonly',
         URL: 'readonly',
+        localStorage: 'readonly',
+        sessionStorage: 'readonly',
+        navigator: 'readonly',
+        queueMicrotask: 'readonly',
       },
     },
   },

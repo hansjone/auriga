@@ -1,4 +1,4 @@
-/* global AbortSignal, document */
+/* global AbortSignal */
 /** Native React settings. Status is supplied by the authenticated runtime. */
 import {
   createSettingsUI,
@@ -1708,7 +1708,7 @@ export function createSettingsView(
       locale,
       boot,
       consent,
-      gotoOverview,
+      gotoOverview: _gotoOverview,
     },
   ) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];

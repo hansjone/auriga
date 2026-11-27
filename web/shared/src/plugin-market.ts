@@ -6,11 +6,7 @@ export type PluginMarket = NonNullable<
 
 export type StarResult = Pick<PluginMarket, 'starred' | 'starCount'>;
 export type MarketSort =
-  | ''
-  | 'publishedAt'
-  | 'installationCount'
-  | 'starCount'
-  | 'name';
+  '' | 'publishedAt' | 'installationCount' | 'starCount' | 'name';
 
 interface MarketPackage {
   id: string;
