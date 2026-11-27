@@ -621,16 +621,16 @@ public final class CatalogWorkflow {
                   a);
           var result = JSON.createObjectNode();
           var items = result.putArray("items");
-          var page = rows.subList(0, Math.min(limit, rows.size()));
+          var window = rows.subList(0, Math.min(limit, rows.size()));
           boolean packagePage = p == null && phase == null;
           boolean extended = actor.type() != PrincipalType.DEVICE;
           Map<Object, Map<String, Object>> releases =
-              packagePage ? marketReleases(r, page) : Map.of();
+              packagePage ? marketReleases(r, window) : Map.of();
           Map<Object, Map<String, Object>> latest =
-              packagePage && extended ? latestVersions(r, page) : Map.of();
+              packagePage && extended ? latestVersions(r, window) : Map.of();
           Map<Object, String> published =
-              packagePage && extended ? publishedVersions(page) : Map.of();
-          for (var row : page)
+              packagePage && extended ? publishedVersions(window) : Map.of();
+          for (var row : window)
             items.add(
                 packagePage
                     ? marketPackage(
@@ -752,7 +752,7 @@ public final class CatalogWorkflow {
               row,
               releases.get(row.get("id")),
               latest.get(row.get("id")),
-              published.get(row.get("id")));
+              published.get(row.get("id"))));
     result.put("total", total);
     return result;
   }
