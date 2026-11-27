@@ -10,6 +10,7 @@ import { createModelLifecycle } from '../ai/installation.js';
 import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
+import { setImmediate as defer } from 'node:timers';
 import { desktopUpdater, desktopStartupFailure } from './desktop.js';
 import { createVault } from './vault.js';
 import { revokeLegacyCredentials } from './legacy-revocation.js';
@@ -76,7 +77,8 @@ export async function createConnectRuntime({
   /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
 
   /** @type {any} */ let principal;
-  /** @type {string|undefined} */ let retainedCatalogGeneration;
+  /** Resident account projection for UI; survives ops fences until logout. */
+  /** @type {any} */ let presentation;
   /** @type {{displayName?:string,avatarUrl?:string}|undefined} */ let memberProfile;
   /** @type {{reachable:boolean,lastSuccessAt:string}|undefined} */ let probeEvidence;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
@@ -130,42 +132,34 @@ export async function createConnectRuntime({
       if (desktop?.status().required) return refuse('desktop.update_required');
     },
     onInvalidate() {
-      // Revision bumps notify here before onChange. Only an explicit signed_out
-      // (or onChange identity switch) may drop the retained principal/catalog.
-      queueMicrotask(() => {
+      // Fence ops immediately (including resolve()). Keep `presentation` for UI
+      // until onChange / expiry decides the resident outcome.
+      principal = undefined;
+      retireBoundSessions({ keepModels: false });
+      defer(() => {
         if (closed) return;
         const s = shellNow.current?.() ?? latestShell;
-        if (principal && s?.state !== 'signed_out') {
+        if (
+          presentation &&
+          s &&
+          [
+            'authenticated',
+            'unreachable',
+            'reauth_required',
+            'revoked',
+            'authenticating',
+          ].includes(s.state)
+        ) {
+          if (s.state === 'unreachable') models?.login();
           for (const listener of listeners)
             void Promise.resolve()
               .then(listener)
               .catch(() => {});
           return;
         }
-        if (!principal) {
-          for (const listener of listeners)
-            void Promise.resolve()
-              .then(listener)
-              .catch(() => {});
-          return;
-        }
-        principal = undefined;
+        presentation = undefined;
         memberProfile = undefined;
         probeEvidence = undefined;
-        retainedCatalogGeneration = undefined;
-        models?.logout();
-        network?.logout();
-        key = '';
-        contexts?.invalidate();
-        enterpriseContexts?.invalidate();
-        teamGeneration++;
-        startingTeam?.close();
-        void closeStorage(startingVault);
-        team?.close();
-        team = undefined;
-        void closeStorage(teamVault);
-        teamVault = undefined;
-        communication = 'idle';
         for (const listener of listeners)
           void Promise.resolve()
             .then(listener)
@@ -174,19 +168,38 @@ export async function createConnectRuntime({
     },
     onChange(snapshot) {
       latestShell = snapshot;
-      // Keep the last verified principal for every non-logout shell state so
-      // marketplace/account UI stay resident until the user signs out.
-      if (principal && snapshot && snapshot.state !== 'signed_out') {
-        if (snapshot.state !== 'authenticated') {
+      if (snapshot?.state === 'signed_out') {
+        principal = undefined;
+        presentation = undefined;
+        memberProfile = undefined;
+        probeEvidence = undefined;
+        for (const listener of listeners)
+          void Promise.resolve()
+            .then(listener)
+            .catch(() => {});
+        return;
+      }
+      if (presentation && snapshot && snapshot.state !== 'authenticated') {
+        if (snapshot.state === 'unreachable') {
+          models?.login();
           for (const listener of listeners)
             void Promise.resolve()
               .then(listener)
               .catch(() => {});
           return;
         }
-      } else if (principal && snapshot?.state === 'signed_out') {
-        /* fall through to clear */
-      } else if (!snapshot && principal) {
+        if (
+          ['reauth_required', 'revoked', 'authenticating'].includes(
+            snapshot.state,
+          )
+        ) {
+          for (const listener of listeners)
+            void Promise.resolve()
+              .then(listener)
+              .catch(() => {});
+          return;
+        }
+      } else if (!snapshot && presentation) {
         for (const listener of listeners)
           void Promise.resolve()
             .then(listener)
@@ -231,7 +244,7 @@ export async function createConnectRuntime({
                 empNo: next.empNo,
               })
             : undefined;
-          if (!principal) retainedCatalogGeneration = undefined;
+          presentation = principal;
           isolationPending = false;
           if (principal) {
             models?.login();
@@ -253,6 +266,36 @@ export async function createConnectRuntime({
         });
     },
   });
+  function retireBoundSessions({ keepModels }) {
+    if (!keepModels) {
+      models?.logout();
+      network?.logout();
+    }
+    key = '';
+    contexts?.invalidate();
+    enterpriseContexts?.invalidate();
+    teamGeneration++;
+    startingTeam?.close();
+    void closeStorage(startingVault);
+    team?.close();
+    team = undefined;
+    void closeStorage(teamVault);
+    teamVault = undefined;
+    communication = 'idle';
+  }
+  function clearResidentAuth({ keepPresentation }) {
+    principal = undefined;
+    if (!keepPresentation) {
+      presentation = undefined;
+      memberProfile = undefined;
+      probeEvidence = undefined;
+    }
+    retireBoundSessions({ keepModels: false });
+    for (const listener of listeners)
+      void Promise.resolve()
+        .then(listener)
+        .catch(() => {});
+  }
   shellNow.current = () => broker.state.current();
   const stopLocalProof = installed?.ipc
     ? bindLocalUacProof({ identity: localUac, broker })
@@ -263,28 +306,34 @@ export async function createConnectRuntime({
   });
   if (principal) models.login();
   const recoveringPlatform = (/** @type {any} */ s) =>
-    Boolean(
-      principal &&
-        s &&
-        ['unreachable', 'reauth_required'].includes(s.state),
-    );
-  // Keep presentation identity until explicit signed_out; broker.call still waits
-  // for authenticated before issuing platform RPCs.
-  const identity = () => {
-    if (!principal) return undefined;
-    if (broker.state.current()?.state === 'signed_out') return undefined;
-    return principal;
+    Boolean(presentation && s?.state === 'unreachable');
+  // Ops/admission identity only while authenticated after isolation gates.
+  // Presentation stays resident across retainable non-logout projections.
+  const identity = () =>
+    broker.state.current()?.state === 'authenticated' ? principal : undefined;
+  const presentationIdentity = () => {
+    if (!presentation) return undefined;
+    const s = broker.state.current();
+    if (
+      !s ||
+      ![
+        'authenticated',
+        'unreachable',
+        'reauth_required',
+        'revoked',
+        'authenticating',
+      ].includes(s.state)
+    )
+      return undefined;
+    return presentation;
   };
   // Fence by verified member/device identity, not the rotating shell authorization
   // UUID. Token self-heal remints authorization and must not bust the marketplace
   // cache or force a full catalog prefetch.
   const catalogGeneration = () => {
-    const who = identity();
-    if (!who) {
-      retainedCatalogGeneration = undefined;
-      return undefined;
-    }
-    retainedCatalogGeneration = createHash('sha256')
+    const who = presentationIdentity();
+    if (!who) return undefined;
+    return createHash('sha256')
       .update('auriga-desktop-catalog-identity:')
       .update(
         JSON.stringify([
@@ -295,7 +344,6 @@ export async function createConnectRuntime({
         ]),
       )
       .digest('hex');
-    return retainedCatalogGeneration;
   };
   contexts = createHostContexts({ broker, identity, ctx });
   // A native desktop session uses the current platform login for each new tool.
@@ -683,24 +731,25 @@ export async function createConnectRuntime({
     },
     status(/** @type {any} */ req) {
       const s = broker.state.current(),
-        who = requests.has(req) ? identity() : undefined,
+        live = requests.has(req) ? identity() : undefined,
+        who = requests.has(req) ? presentationIdentity() : undefined,
         recovering = recoveringPlatform(s);
-      // Unreachable snapshots omit identity; rebuild a presentation binding from
-      // the retained principal so account rows do not disappear during self-heal.
+      // Unreachable / reauth / revoked snapshots omit identity; rebuild a
+      // presentation binding from the retained principal for resident UI.
       const bindingSource =
         s?.state === 'authenticated'
           ? s
-          : recovering && principal
+          : who && s
             ? {
                 state: 'authenticated',
                 shellEpoch: s.shellEpoch,
                 revision: s.revision,
                 identity: {
-                  tenantId: principal.tenantId,
-                  memberId: principal.ownerId,
-                  deviceId: principal.clientId,
-                  providerId: principal.providerId,
-                  ...(principal.empNo ? { empNo: principal.empNo } : {}),
+                  tenantId: who.tenantId,
+                  memberId: who.ownerId,
+                  deviceId: who.clientId,
+                  providerId: who.providerId,
+                  ...(who.empNo ? { empNo: who.empNo } : {}),
                 },
               }
             : s;
@@ -708,10 +757,10 @@ export async function createConnectRuntime({
         available: true,
         configured: !!config.platformOrigin,
         loggedIn: !!who,
-        connected: !!who && !recovering && communication === 'ready',
+        connected: !!live && !recovering && communication === 'ready',
         recovering,
         communication,
-        connection: who && team ? team.summary : null,
+        connection: live && team ? team.summary : null,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
         ...(requests.has(req) && s?.inlineLogin
@@ -731,13 +780,7 @@ export async function createConnectRuntime({
         ...(s?.localUacProof ? { localUacProof: true } : {}),
         ...(requests.has(req) &&
         s &&
-        ['signed_out', 'revoked'].includes(s.state) &&
-        localUac?.status?.().state === 'authenticated'
-          ? { canRetryLocalUac: true }
-          : {}),
-        ...(requests.has(req) &&
-        s?.state === 'reauth_required' &&
-        !recovering &&
+        ['signed_out', 'reauth_required', 'revoked'].includes(s.state) &&
         localUac?.status?.().state === 'authenticated'
           ? { canRetryLocalUac: true }
           : {}),
@@ -750,17 +793,17 @@ export async function createConnectRuntime({
               catalogGeneration: catalogGeneration(),
               ...(s?.identity?.empNo
                 ? { empNo: s.identity.empNo }
-                : principal?.empNo
-                  ? { empNo: principal.empNo }
+                : who.empNo
+                  ? { empNo: who.empNo }
                   : {}),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,
         csrf: requests.has(req) ? csrf : undefined,
-        ...(who && s?.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
+        ...(live && s?.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
         network: network.status,
         models: models?.status ?? { available: false, state: 'idle' },
-        capabilities: { consent: !!who && network.consentAvailable },
+        capabilities: { consent: !!live && network.consentAvailable },
       };
     },
     prepare(/** @type {any} */ req) {
@@ -769,24 +812,25 @@ export async function createConnectRuntime({
     /** One verified snapshot for cross-route presentation correlation only. */
     platformIdentity() {
       const s = broker.state.current();
+      const who = presentationIdentity();
       if (s?.state === 'authenticated' && s.identity?.empNo)
         return {
           empNo: s.identity.empNo,
           profileBinding: memberProfileBinding(s),
         };
-      if (recoveringPlatform(s) && principal?.empNo)
+      if (who?.empNo && s)
         return {
-          empNo: principal.empNo,
+          empNo: who.empNo,
           profileBinding: memberProfileBinding({
             state: 'authenticated',
             shellEpoch: s.shellEpoch,
             revision: s.revision,
             identity: {
-              tenantId: principal.tenantId,
-              memberId: principal.ownerId,
-              deviceId: principal.clientId,
-              providerId: principal.providerId,
-              empNo: principal.empNo,
+              tenantId: who.tenantId,
+              memberId: who.ownerId,
+              deviceId: who.clientId,
+              providerId: who.providerId,
+              empNo: who.empNo,
             },
           }),
         };
@@ -796,8 +840,7 @@ export async function createConnectRuntime({
     platformEmployee() {
       const s = broker.state.current();
       if (s?.state === 'authenticated') return s.identity?.empNo;
-      if (recoveringPlatform(s)) return principal?.empNo;
-      return undefined;
+      return presentationIdentity()?.empNo;
     },
     async command(
       /** @type {any} */ req,
@@ -808,33 +851,16 @@ export async function createConnectRuntime({
       if (action === 'reconnect') {
         if (!broker.state.current()) await broker.state.connect();
         if (identity()) void beginTeam();
-      } else await broker.state.command(action, input);
+      } else {
+        // Explicit logout must drop resident UI before the remote round-trip.
+        if (action === 'logout') clearResidentAuth({ keepPresentation: false });
+        await broker.state.command(action, input);
+      }
       return this.status(req);
     },
     async resetAuthentication() {
-      // Trusted platform switch / rebind: drop resident identity immediately.
-      principal = undefined;
-      memberProfile = undefined;
-      probeEvidence = undefined;
-      retainedCatalogGeneration = undefined;
-      models?.logout();
-      network?.logout();
-      key = '';
-      contexts?.invalidate();
-      enterpriseContexts?.invalidate();
-      teamGeneration++;
-      startingTeam?.close();
-      void closeStorage(startingVault);
-      team?.close();
-      team = undefined;
-      void closeStorage(teamVault);
-      teamVault = undefined;
-      communication = 'idle';
+      clearResidentAuth({ keepPresentation: false });
       broker.close();
-      for (const listener of listeners)
-        void Promise.resolve()
-          .then(listener)
-          .catch(() => {});
     },
     attachNetwork: network.attach,
     attachModels: models.attach,

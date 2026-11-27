@@ -169,10 +169,8 @@ export class DesktopCatalog {
   }
 
   rejectAuth(error: unknown) {
-    this.lifetime.abort();
-    this.lifetime = new AbortController();
-    this.snapshot = undefined;
-    this.versions.clear();
+    // Surface the failure without discarding resident market rows; the host
+    // clears the catalog session only on explicit logout / identity switch.
     this.error = error;
     this.emit();
   }
@@ -198,10 +196,8 @@ export class DesktopCatalog {
     } catch (error) {
       if (lifetime.aborted) return;
       this.error = error;
-      if ([401, 403].includes(catalogStatus(error) ?? 0)) {
-        this.snapshot = undefined;
-        this.versions.clear();
-      }
+      // Keep the last loaded market snapshot on auth blips. Explicit sign-out /
+      // scope clearCatalog owns wiping resident cache, not a transient 401.
     } finally {
       operation.abort();
       this.loading = false;

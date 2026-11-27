@@ -219,12 +219,20 @@ export async function createBroker({
       lastAuthenticatedSnapshot.shellEpoch !== retained.shellEpoch
     )
       return false;
-    // Unreachable keeps the authorization key; reauth_required clears it in
-    // shell-state while the local refresh_token may still self-heal.
+    // Unreachable usually keeps the authorization key; reauth_required clears
+    // it first, so a follow-on offline flip may have a null key while the same
+    // retained identity is still healing.
     if (snap.state === 'unreachable') {
+      const currentKey = state.authorization?.();
+      if (currentKey)
+        return (
+          Boolean(anchorKey) &&
+          currentKey === anchorKey &&
+          anchorKey === lastAuthenticatedKey
+        );
       return (
         Boolean(anchorKey) &&
-        state.authorization?.() === anchorKey &&
+        Boolean(lastAuthenticatedKey) &&
         anchorKey === lastAuthenticatedKey
       );
     }

@@ -207,7 +207,7 @@ window.__ModuleLoader__.load({
       platform_unconfigured: '未配置平台',
       platform_authenticating: '正在登录平台',
       platform_unreachable: '平台不可达',
-      platform_recovering: '平台暂不可达，正在自动恢复',
+      platform_recovering: '平台不可达，正在自动恢复',
       platform_reauth: '平台登录已过期',
       platform_signedOut: '未登录平台',
       platform_connected: '平台已连接',
@@ -2026,17 +2026,7 @@ window.__ModuleLoader__.load({
             desktopCatalog?.generation === generation
           )
             return;
-          // Same owner with a healed generation: retarget without wiping cache.
-          if (
-            desktopCatalog?.ownerId === ownerId &&
-            desktopCatalog &&
-            generation &&
-            desktopCatalog.generation !== generation
-          ) {
-            desktopCatalog = Object.freeze({ ownerId, generation });
-            emit();
-            return;
-          }
+          // Real generation change (identity/device fence) replaces the scope.
           if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
           desktopCatalog = Object.freeze({ ownerId, generation });
           emit();
@@ -2132,9 +2122,17 @@ window.__ModuleLoader__.load({
                 if (shellRead && next) updateDesktopCatalog(next, shellRead);
                 setValue((previous) => {
                   if (next) return next;
-                  // Keep the last good shell/account projection across poll
-                  // failures so marketplace and identity stay resident.
-                  if (path === 'auriga/shell/status' && previous) return previous;
+                  // Keep resident account fields across poll failures, but mark
+                  // soft-offline so Team/actions do not stay falsely ready.
+                  if (path === 'auriga/shell/status' && previous) {
+                    if (!previous.loggedIn) return previous;
+                    return {
+                      ...previous,
+                      connected: false,
+                      recovering: true,
+                      platform: 'unreachable',
+                    };
+                  }
                   if (keepAvailability && previous?.available)
                     return { available: true, reason: 'status_unavailable' };
                   return null;
@@ -2312,12 +2310,14 @@ window.__ModuleLoader__.load({
                     : 'signedOut',
               tone: shell.platform === 'unreachable' ? 'warning' : 'idle',
             };
-          if (shell.platform === 'revoked')
-            return { kind: 'reauth', tone: 'warning' };
+          // Keep account visible; only unreachable is soft-recovering. Terminal
+          // reauth/revoked still offer sign-in while the market cache stays.
           if (
-            shell.recovering ||
-            ['unreachable', 'reauth_required'].includes(shell.platform)
+            shell.platform === 'revoked' ||
+            shell.platform === 'reauth_required'
           )
+            return { kind: 'reauth', tone: 'warning' };
+          if (shell.recovering || shell.platform === 'unreachable')
             return { kind: 'recovering', tone: 'warning' };
           return shell.connected
             ? { kind: 'connected', tone: 'done' }
