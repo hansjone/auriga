@@ -8,7 +8,7 @@ const unavailable = (code = 'common.unavailable') =>
 /** Fixed platform client. Desktop uses C's OS-authenticated IPC; managed native
  * composition supplies its file-bound state. Both validate the frozen business
  * and host DTOs from the same producer artifact.
- * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any,checkBusinessAccess?:()=>void}} options */
+ * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any,checkBusinessAccess?:()=>void,authWaitMs?:number}} options */
 export async function createBroker({
   ipc,
   validate,
@@ -91,7 +91,16 @@ export async function createBroker({
       }
     : undefined;
   /** @type {Set<(snapshot:any)=>void>} */ const changeListeners = new Set();
+  /** @type {any} */ let lastAuthenticatedSnapshot;
+  /** @type {string|null} */ let lastAuthenticatedKey = null;
   const handleStateChange = (/** @type {any} */ next) => {
+    if (next?.state === 'authenticated') {
+      lastAuthenticatedSnapshot = next;
+      lastAuthenticatedKey = state?.authorization?.() ?? null;
+    } else if (next && next.state !== 'unreachable') {
+      lastAuthenticatedSnapshot = undefined;
+      lastAuthenticatedKey = null;
+    }
     for (const listener of [...changeListeners]) listener(next);
     onChange?.(next);
   };
@@ -131,15 +140,22 @@ export async function createBroker({
     { allowRevisionAdvance = false } = {},
   ) {
     const snapBefore = state.current();
+    const anchorAuthKey = state.authorization?.() ?? null;
     const check = state.fence();
+    const sameOrTransientUnreachable = (/** @type {any} */ next) => {
+      if (sameAuthenticatedIdentity(snapBefore, next)) return true;
+      return (
+        !stateFactory &&
+        next?.state === 'unreachable' &&
+        Boolean(anchorAuthKey) &&
+        state.authorization?.() === anchorAuthKey
+      );
+    };
     const verify = () => {
       try {
         check();
       } catch (error) {
-        if (
-          allowRevisionAdvance &&
-          sameAuthenticatedIdentity(snapBefore, state.current())
-        )
+        if (allowRevisionAdvance && sameOrTransientUnreachable(state.current()))
           return;
         throw error;
       }
@@ -150,10 +166,7 @@ export async function createBroker({
     try {
       return await new Promise((resolve, reject) => {
         onStateChange = (next) => {
-          if (
-            allowRevisionAdvance &&
-            !sameAuthenticatedIdentity(snapBefore, next)
-          ) {
+          if (allowRevisionAdvance && !sameOrTransientUnreachable(next)) {
             reject(unavailable('common.unauthenticated'));
           }
         };
@@ -184,9 +197,14 @@ export async function createBroker({
     if (closed) throw unavailable('common.unauthenticated');
     const initial = state.current();
     if (initial?.state === 'authenticated') return;
+    if (stateFactory) throw unavailable('common.unauthenticated');
+    const anchorKey = state.authorization?.() ?? null;
+    const anchorSnap = lastAuthenticatedSnapshot;
     if (
-      !initial ||
-      !['unreachable', 'authenticating'].includes(initial.state)
+      initial?.state !== 'unreachable' ||
+      !anchorKey ||
+      anchorKey !== lastAuthenticatedKey ||
+      !anchorSnap
     ) {
       throw unavailable('common.unauthenticated');
     }
@@ -205,20 +223,33 @@ export async function createBroker({
         if (closed)
           return finish(() => reject(unavailable('common.unauthenticated')));
         const cur = state.current();
-        if (cur?.state === 'authenticated')
-          return finish(() => resolve(undefined));
-        if (!cur || !['unreachable', 'authenticating'].includes(cur.state)) {
+        if (cur?.state === 'authenticated') {
+          if (
+            state.authorization?.() === anchorKey &&
+            sameAuthenticatedIdentity(anchorSnap, cur)
+          ) {
+            return finish(() => resolve(undefined));
+          }
+          return finish(() => reject(unavailable('common.unauthenticated')));
+        }
+        if (
+          cur?.state !== 'unreachable' ||
+          state.authorization?.() !== anchorKey
+        ) {
           return finish(() => reject(unavailable('common.unauthenticated')));
         }
       };
       changeListeners.add(check);
-      const offInvalidation = state.subscribeInvalidation(check);
+      const offInvalidation = state.subscribeInvalidation(() => {
+        if (!state.current()) check();
+      });
       timer = setTimeout(() => {
         const cur = state.current();
         finish(() =>
           reject(
             unavailable(
-              cur?.state === 'unreachable'
+              cur?.state === 'unreachable' &&
+                state.authorization?.() === anchorKey
                 ? 'common.unavailable'
                 : 'common.unauthenticated',
             ),
@@ -233,7 +264,7 @@ export async function createBroker({
     const s = state.current();
     if (s?.state !== 'authenticated' || closed)
       throw unavailable(
-        s?.state === 'unreachable'
+        !stateFactory && s?.state === 'unreachable'
           ? 'common.unavailable'
           : 'common.unauthenticated',
       );
@@ -311,6 +342,7 @@ export async function createBroker({
       await waitForAuthenticated();
       for (let attempt = 0; attempt < 2; attempt++) {
         const snapBefore = state.current();
+        const anchorAuthKey = state.authorization?.() ?? null;
         const check = state.fence(),
           command = { ...envelope(), call: { operation, input } };
         validate('ShellAuthBusinessCall', command);
@@ -326,16 +358,10 @@ export async function createBroker({
         if (
           attempt === 0 &&
           result.error?.code === 'common.conflict' &&
+          result.error.upstreamStatus === undefined &&
           snapBefore?.shellEpoch
         ) {
-          let snapAfter = state.current();
-          if (
-            snapAfter?.shellEpoch === snapBefore.shellEpoch &&
-            snapAfter.revision === snapBefore.revision
-          ) {
-            await state.connect().catch(() => {});
-            snapAfter = state.current();
-          }
+          const snapAfter = state.current();
           if (
             sameAuthenticatedIdentity(snapBefore, snapAfter) &&
             snapAfter.revision !== snapBefore.revision
@@ -346,8 +372,14 @@ export async function createBroker({
         try {
           check();
         } catch (error) {
-          if (!sameAuthenticatedIdentity(snapBefore, state.current()))
-            throw error;
+          const cur = state.current();
+          const stillSameSession =
+            sameAuthenticatedIdentity(snapBefore, cur) ||
+            (!stateFactory &&
+              cur?.state === 'unreachable' &&
+              Boolean(anchorAuthKey) &&
+              state.authorization?.() === anchorAuthKey);
+          if (!stillSameSession) throw error;
         }
         if (result.error)
           throw Object.assign(unavailable(result.error.code), {

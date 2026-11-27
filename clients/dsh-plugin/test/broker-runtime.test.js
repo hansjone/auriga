@@ -366,3 +366,44 @@ test('broker.call retries once when same-identity revision advances and causes c
   assert.equal(output.statusCode, 200);
   assert.equal(attempts, 2);
 });
+
+test('broker.call rejects queued call when account switches during unreachable recovery', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  connection.transition('unreachable');
+  const pending = runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('authenticated', { memberId: randomUUID() });
+  await assert.rejects(pending, { code: 'common.unauthenticated' });
+});
+
+test('broker.call never retries upstream HTTP 409 business conflict', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  const origCall = connection.ipc.call;
+  let attempts = 0;
+  connection.ipc.call = async (message) => {
+    if (message.call?.operation === 'UnifiedListResourcePackages') {
+      attempts++;
+      return {
+        requestId: message.requestId,
+        operation: 'UnifiedListResourcePackages',
+        error: {
+          code: 'common.conflict',
+          retryable: false,
+          upstreamStatus: 409,
+        },
+      };
+    }
+    return origCall(message);
+  };
+  await assert.rejects(
+    runtime.broker.call('UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    { code: 'common.conflict' },
+  );
+  assert.equal(attempts, 1);
+});

@@ -78,7 +78,11 @@ export class BusinessProxy {
     this.changed = () => {
       for (const c of this.controllers) c.abort();
     };
-    broker.on('identity_invalidated', this.changed);
+    this.invalidationEvent =
+      typeof broker.canSelfHeal === 'function'
+        ? 'identity_invalidated'
+        : 'changed';
+    broker.on(this.invalidationEvent, this.changed);
   }
   async call(message, owner) {
     requireValid('ShellAuthBusinessCall', message);
@@ -101,7 +105,14 @@ export class BusinessProxy {
         return response({ error: error('common.conflict') });
       // Cached results are still identity-bound, including tickets and reads.
       try {
-        this.broker.assert(previous.context);
+        if (previous.context) {
+          this.broker.assert(
+            previous.context,
+            typeof this.broker.canSelfHeal === 'function'
+              ? { allowRevisionAdvance: true }
+              : undefined,
+          );
+        }
         if (operation === 'network_open') {
           this.host.resolve(owner, input.executionContextId, 'session');
           const cached = await previous.result;
@@ -130,35 +141,59 @@ export class BusinessProxy {
       remaining = deadline - Date.now();
     if (remaining <= 0 || remaining > 30000 || this.requests.size >= 512)
       return response({ error: error('common.validation_failed') });
-    let context;
-    try {
-      context = this.broker.guard(message.shellEpoch, message.expectedRevision);
-    } catch (e) {
-      if (
-        e.code === 'common.unauthenticated' &&
-        message.shellEpoch === this.broker.epoch &&
-        this.broker.canSelfHeal()
-      ) {
-        try {
-          context = await this.broker.ensureAuthenticated({
-            timeoutMs: Math.min(remaining, 10000),
-          });
-        } catch (healError) {
-          return response({
-            error: error(
-              healError.code ?? 'common.unauthenticated',
-              healError.code === 'common.unavailable',
-            ),
-          });
+    const entry = {
+      hash,
+      owner,
+      context: undefined,
+      until: performance.now() + remaining,
+      result: undefined,
+    };
+    const run = async () => {
+      let context;
+      try {
+        context = this.broker.guard(
+          message.shellEpoch,
+          message.expectedRevision,
+        );
+      } catch (e) {
+        if (
+          e.code === 'common.unauthenticated' &&
+          message.shellEpoch === this.broker.epoch &&
+          this.broker.canSelfHeal?.()
+        ) {
+          try {
+            context = await this.broker.ensureAuthenticated({
+              timeoutMs: Math.min(remaining, 10000),
+              expectedRevision: message.expectedRevision,
+            });
+          } catch (healError) {
+            return response({
+              error: error(
+                healError.code ?? 'common.unauthenticated',
+                healError.code === 'common.unavailable',
+              ),
+            });
+          }
+        } else {
+          return response({ error: error(e.code ?? 'common.unauthenticated') });
         }
-      } else {
-        return response({ error: error(e.code ?? 'common.unauthenticated') });
       }
-    }
-    const result = this.execute(definition, input, context, remaining, owner)
-      .then((output) => response({ output }))
-      .catch((e) =>
-        response({
+      const remainingAfterHeal = deadline - Date.now();
+      if (remainingAfterHeal <= 0) {
+        return response({ error: error('common.unavailable', true) });
+      }
+      entry.context = context;
+      try {
+        const output = await this.execute(
+          definition,
+          input,
+          context,
+          remainingAfterHeal,
+          owner,
+        );
+        return response({ output });
+      } catch (e) {
+        return response({
           error:
             e.businessError ??
             error(
@@ -170,18 +205,14 @@ export class BusinessProxy {
               ].includes(e.code)
                 ? e.code
                 : 'common.unavailable',
-              !e.code,
+              !e.code || e.code === 'common.unavailable',
             ),
-        }),
-      );
-    this.requests.set(message.requestId, {
-      hash,
-      owner,
-      context,
-      until: performance.now() + remaining,
-      result,
-    });
-    return result;
+        });
+      }
+    };
+    entry.result = run();
+    this.requests.set(message.requestId, entry);
+    return entry.result;
   }
   async execute(definition, input, context, remaining, owner) {
     if (
@@ -359,13 +390,18 @@ export class BusinessProxy {
       if (
         response.status === 401 &&
         canReplayOn401 &&
-        this.broker.canSelfHeal()
+        this.broker.canSelfHeal?.()
       ) {
         await response.body?.cancel?.().catch(() => {});
+        const expectedIdentityKey = this.broker.identityKey?.({
+          identity: context.identity,
+        });
         try {
           activeContext = await this.broker.ensureAuthenticated({
             forceRefresh: true,
             timeoutMs: Math.min(remaining, 8000),
+            expectedGeneration: context.generation,
+            expectedIdentityKey,
           });
           this.broker.assert(activeContext, { allowRevisionAdvance: true });
           token = await this.broker.tokenFor(
@@ -374,7 +410,6 @@ export class BusinessProxy {
             definition.operation,
           );
           this.broker.assert(activeContext, { allowRevisionAdvance: true });
-          response = await sendFetch(token);
         } catch (healError) {
           if (healError?.code === 'common.unavailable')
             throw Object.assign(new Error('common.unavailable'), {
@@ -384,7 +419,32 @@ export class BusinessProxy {
             code: 'common.unauthenticated',
           });
         }
+        response = await sendFetch(token);
       }
+      const resolveStreamContext = () => {
+        if (typeof this.broker.canSelfHeal !== 'function') {
+          this.broker.assert(activeContext);
+          return activeContext;
+        }
+        this.broker.assert(activeContext, { allowRevisionAdvance: true });
+        if (activeContext.revision === this.broker.revision) {
+          return activeContext;
+        }
+        const refreshed = this.broker.guard(
+          activeContext.epoch,
+          this.broker.revision,
+        );
+        if (
+          refreshed.generation !== activeContext.generation ||
+          this.broker.identityKey({ identity: refreshed.identity }) !==
+            this.broker.identityKey({ identity: activeContext.identity })
+        ) {
+          throw Object.assign(new Error('common.unauthenticated'), {
+            code: 'common.unauthenticated',
+          });
+        }
+        return refreshed;
+      };
       if (
         definition.operation === 'createAiChatCompletionStream' &&
         response.ok
@@ -396,9 +456,10 @@ export class BusinessProxy {
           !response.body
         )
           throw new Error('invalid SSE response');
+        const streamContext = resolveStreamContext();
         clearTimeout(timeout);
         const reader = response.body.getReader();
-        const stream = this.streams.create(context, owner, () => {
+        const stream = this.streams.create(streamContext, owner, () => {
           controller.abort();
           reader.cancel().catch(() => {});
         });
@@ -414,9 +475,10 @@ export class BusinessProxy {
       }
       if (definition.stream && response.ok) {
         if (!response.body) throw new Error('empty streaming response');
+        const streamContext = resolveStreamContext();
         clearTimeout(timeout);
         const reader = response.body.getReader();
-        const stream = this.streams.create(context, owner, () => {
+        const stream = this.streams.create(streamContext, owner, () => {
           controller.abort();
           reader.cancel().catch(() => {});
         });
@@ -549,7 +611,7 @@ export class BusinessProxy {
     this.team.close();
     this.streams.close();
     this.changed();
-    this.broker.off('identity_invalidated', this.changed);
+    this.broker.off(this.invalidationEvent, this.changed);
     this.requests.clear();
   }
   async pumpSse(stream, reader) {

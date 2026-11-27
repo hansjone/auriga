@@ -162,7 +162,8 @@ export class Broker extends EventEmitter {
     );
   }
   transition(state, reason, projection) {
-    const previousIdentityKey = this.identityKey(this.projection);
+    const previousIdentityKey =
+      this.identityKey(this.projection) || this.lastAuthenticatedIdentityKey;
     const nextIdentityKey = this.identityKey(projection);
     const identity = projection?.identity ?? this.projection?.identity;
     if (state === 'authenticating' || !reason) this.loginError = undefined;
@@ -170,6 +171,43 @@ export class Broker extends EventEmitter {
     this.reason = reason;
     this.projection = projection;
     this.revision++;
+    const generationChanged =
+      this.lastAuthenticatedGeneration !== undefined &&
+      this.generation !== this.lastAuthenticatedGeneration;
+    const identityChanged = Boolean(
+      previousIdentityKey &&
+        nextIdentityKey &&
+        previousIdentityKey !== nextIdentityKey,
+    );
+    const invalidated =
+      ['signed_out', 'revoked'].includes(state) ||
+      (state === 'reauth_required' && !this.canSelfHeal()) ||
+      generationChanged ||
+      identityChanged;
+    if (invalidated) {
+      this.lastAuthenticatedRevisions?.clear();
+      this.lastAuthenticatedIdentityKey = '';
+      this.lastAuthenticatedGeneration = undefined;
+    }
+    if (state === 'authenticated' && nextIdentityKey) {
+      this.lastAuthenticatedRevisions ??= new Set();
+      if (
+        this.lastAuthenticatedGeneration !== this.generation ||
+        this.lastAuthenticatedIdentityKey !== nextIdentityKey
+      ) {
+        this.lastAuthenticatedRevisions.clear();
+      }
+      this.lastAuthenticatedGeneration = this.generation;
+      this.lastAuthenticatedIdentityKey = nextIdentityKey;
+      this.lastAuthenticatedRevisions.add(this.revision);
+    } else if (
+      !invalidated &&
+      ['unreachable', 'reauth_required'].includes(state) &&
+      this.lastAuthenticatedGeneration === this.generation &&
+      this.lastAuthenticatedIdentityKey
+    ) {
+      this.lastAuthenticatedRevisions?.add(this.revision);
+    }
     const snapshot = this.snapshot();
     this.log({
       ...(identity
@@ -183,12 +221,6 @@ export class Broker extends EventEmitter {
       correlationId: randomUUID(),
       revision: this.revision,
     });
-    const invalidated =
-      ['signed_out', 'revoked'].includes(state) ||
-      (state === 'reauth_required' && !this.canSelfHeal()) ||
-      (previousIdentityKey &&
-        nextIdentityKey &&
-        previousIdentityKey !== nextIdentityKey);
     if (invalidated) this.emit('identity_invalidated', snapshot);
     this.emit('changed', snapshot);
   }
@@ -991,17 +1023,54 @@ export class Broker extends EventEmitter {
     });
     return this.checking;
   }
-  async ensureAuthenticated({ forceRefresh = false, timeoutMs = 8000 } = {}) {
+  async ensureAuthenticated({
+    forceRefresh = false,
+    timeoutMs = 8000,
+    expectedRevision,
+    expectedGeneration,
+    expectedIdentityKey,
+  } = {}) {
     if (this.closed)
       throw Object.assign(new Error('common.unauthenticated'), {
         code: 'common.unauthenticated',
       });
+    const anchorGeneration =
+      expectedGeneration ?? this.lastAuthenticatedGeneration;
+    const anchorIdentityKey =
+      expectedIdentityKey ?? this.lastAuthenticatedIdentityKey;
+    if (
+      expectedRevision !== undefined &&
+      !this.lastAuthenticatedRevisions?.has(expectedRevision)
+    ) {
+      throw conflict();
+    }
+    if (
+      anchorGeneration === undefined ||
+      !anchorIdentityKey ||
+      this.generation !== anchorGeneration
+    ) {
+      throw Object.assign(new Error('common.unauthenticated'), {
+        code: 'common.unauthenticated',
+      });
+    }
+    const assertSameAnchor = () => {
+      if (
+        this.closed ||
+        this.generation !== anchorGeneration ||
+        this.identityKey() !== anchorIdentityKey
+      ) {
+        throw Object.assign(new Error('common.unauthenticated'), {
+          code: 'common.unauthenticated',
+        });
+      }
+    };
     const currentState = this.snapshot().state;
     const nearExpiry =
       !Number.isFinite(this.tokenUntil) ||
       this.tokenUntil - this.now() < 5000 ||
       this.mono() >= this.tokenMonoUntil - 5000;
     if (!forceRefresh && currentState === 'authenticated' && !nearExpiry) {
+      assertSameAnchor();
       return this.guard();
     }
     if (!this.canSelfHeal()) {
@@ -1012,19 +1081,34 @@ export class Broker extends EventEmitter {
     }
     const deadline = this.mono() + Math.max(1000, timeoutMs);
     let timer;
+    let onInvalidated;
     try {
       await Promise.race([
         this.check(forceRefresh),
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(unavailable()), Math.max(1000, deadline - this.mono()));
+          onInvalidated = () =>
+            reject(
+              Object.assign(new Error('common.unauthenticated'), {
+                code: 'common.unauthenticated',
+              }),
+            );
+          this.once('identity_invalidated', onInvalidated);
+          timer = setTimeout(
+            () => reject(unavailable()),
+            Math.max(1000, deadline - this.mono()),
+          );
           timer.unref?.();
         }),
       ]);
     } finally {
       clearTimeout(timer);
+      if (onInvalidated) this.off('identity_invalidated', onInvalidated);
     }
     const after = this.snapshot().state;
-    if (after === 'authenticated') return this.guard();
+    if (after === 'authenticated') {
+      assertSameAnchor();
+      return this.guard();
+    }
     if (after === 'unreachable') throw unavailable();
     throw Object.assign(new Error('common.unauthenticated'), {
       code: 'common.unauthenticated',

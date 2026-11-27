@@ -762,3 +762,88 @@ test('BusinessProxy distinguishes network unavailable from revoked credentials d
   assert.equal(revokedRes.error?.code, 'common.unauthenticated');
   assert.equal(f.broker.snapshot().state, 'revoked');
 });
+
+test('BusinessProxy refuses stale revision self-heal after account switch and preserves replay transport errors', async (t) => {
+  const f = fixture();
+  await login(f);
+  const staleCall = call(f.broker, 'UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  let upstreamCalls = 0;
+  const proxy = new BusinessProxy(f.broker, async () => {
+    upstreamCalls++;
+    return Response.json({ items: [] });
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // Switch to another identity (B), then drop B to unreachable and replay A's stale revision.
+  await f.broker.logout();
+  f.identity.memberId = randomUUID();
+  await login(f);
+  f.broker.transition('unreachable', 'offline');
+  const staleRes = await proxy.call(staleCall, OWNER);
+  assert.ok(
+    ['common.conflict', 'common.unauthenticated'].includes(
+      staleRes.error?.code,
+    ),
+  );
+  assert.equal(upstreamCalls, 0);
+
+  // Restore B and verify transport error on 401 replay maps to retryable common.unavailable.
+  await f.broker.check(true);
+  let attempts = 0;
+  const replayProxy = new BusinessProxy(f.broker, async () => {
+    attempts++;
+    if (attempts === 1) {
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    throw new Error('ECONNRESET');
+  });
+  t.after(() => replayProxy.close());
+  const replayErr = await replayProxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.equal(attempts, 2);
+  assert.equal(replayErr.error?.code, 'common.unavailable');
+  assert.equal(replayErr.error?.retryable, true);
+});
+
+test('BusinessProxy preserves 401 mapping for managed authorities without self-heal methods', async (t) => {
+  const f = fixture();
+  await login(f);
+  const managedAuthority = {
+    epoch: f.broker.epoch,
+    revision: f.broker.revision,
+    platform: f.broker.platform,
+    on: f.broker.on.bind(f.broker),
+    off: f.broker.off.bind(f.broker),
+    guard: f.broker.guard.bind(f.broker),
+    assert: f.broker.assert.bind(f.broker),
+    tokenFor: f.broker.tokenFor.bind(f.broker),
+  };
+  const proxy = new BusinessProxy(
+    managedAuthority,
+    async () =>
+      new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      ),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  const res = await proxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  assert.equal(res.error?.code, 'common.unauthenticated');
+});

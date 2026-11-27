@@ -211,6 +211,10 @@ export function installSubmissionTools(
           const runtime = current();
           const generation = runtime?.catalogGeneration?.();
           if (!generation || runtime.resourceIdentity) return unauthorized();
+          const brokerState = runtime?.broker?.state?.current?.()?.state;
+          if (brokerState === 'unreachable') {
+            return refuse('common.unavailable');
+          }
           const { tenantId, ownerId, hostId } = catalogIdentity(runtime);
           const stamp = JSON.stringify([generation, tenantId, ownerId, hostId]);
           if (scope?.runtime !== runtime || scope?.stamp !== stamp) {
@@ -218,7 +222,9 @@ export function installSubmissionTools(
             scope = { runtime, stamp };
           }
           return scope;
-        } catch {
+        } catch (error) {
+          if (/** @type {any} */ (error)?.code === 'common.unavailable')
+            throw error;
           scope = undefined;
           handles.clear();
           return unauthorized();
