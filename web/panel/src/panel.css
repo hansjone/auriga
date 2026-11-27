@@ -489,7 +489,10 @@ dd {
   margin-top: 2px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, inherit));
+  color: var(
+    --dsw-alias-label-tertiary,
+    var(--dsw-alias-label-secondary, inherit)
+  );
   opacity: 0.72;
 }
 .resource-heading {

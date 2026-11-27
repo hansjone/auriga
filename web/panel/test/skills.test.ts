@@ -176,8 +176,7 @@ it.each([false, true])(
 );
 function click(panel: AurigaTeamPanel, label: string) {
   const button = [...panel.shadowRoot!.querySelectorAll('button')].find(
-    (b) =>
-      b.textContent === label || b.getAttribute('aria-label') === label,
+    (b) => b.textContent === label || b.getAttribute('aria-label') === label,
   );
   expect(button, label).toBeTruthy();
   button!.click();
@@ -185,7 +184,9 @@ function click(panel: AurigaTeamPanel, label: string) {
 function clickRefresh(root: HTMLElement) {
   const button =
     root.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]') ||
-    [...root.querySelectorAll('button')].find((b) => b.textContent === 'Refresh');
+    [...root.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Refresh',
+    );
   expect(button, 'Refresh').toBeTruthy();
   button!.click();
 }
@@ -194,10 +195,7 @@ it('separates Skill reads from legacy plugin APIs, installs the selected exact v
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path.startsWith('/api/resource/v1/packages'))
       return Response.json({ items: [] });
-    if (
-      path.startsWith('catalog/packages?') &&
-      path.includes('kind=skill')
-    )
+    if (path.startsWith('catalog/packages?') && path.includes('kind=skill'))
       return Response.json({
         items: [
           {
@@ -295,10 +293,9 @@ it('discards an old identity response after the panel context changes', async ()
   await settle();
   const nextFetch = vi.fn(async (path: string) =>
     Response.json({
-      items:
-        path.includes('kind=skill')
-          ? [{ id: packageId, kind: 'skill', name: 'new-identity' }]
-          : [],
+      items: path.includes('kind=skill')
+        ? [{ id: packageId, kind: 'skill', name: 'new-identity' }]
+        : [],
       total: path.includes('kind=skill') ? 1 : 0,
     }),
   );

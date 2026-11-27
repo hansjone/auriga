@@ -193,7 +193,9 @@ describe('plugin market', () => {
       older,
       legacy,
     ]);
-    expect(filterPlugins(packages, { ...filters, sort: 'name' }).map((p) => p.name)).toEqual(
+    expect(
+      filterPlugins(packages, { ...filters, sort: 'name' }).map((p) => p.name),
+    ).toEqual(
       [newer, legacy, older]
         .map((p) => p.name)
         .sort((a, b) => a.localeCompare(b)),

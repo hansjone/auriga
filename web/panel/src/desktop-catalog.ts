@@ -356,8 +356,8 @@ export class DesktopCatalog {
   private queuedWork?: (signal: AbortSignal) => Promise<void>;
 
   private async run(work: (signal: AbortSignal) => Promise<void>) {
-    if (this.mutating || this.lifetime.signal.aborted) return;
-    if (this.loading) {
+    if (this.lifetime.signal.aborted) return;
+    if (this.loading || this.mutating) {
       this.queuedWork = work;
       return;
     }
@@ -409,7 +409,10 @@ export class DesktopCatalog {
     };
   }
 
-  private async packagesPage(query: MarketListQuery, signal: AbortSignal) {
+  private async packagesPage(
+    query: MarketListQuery,
+    signal: AbortSignal,
+  ): Promise<MarketPage> {
     const params = new URLSearchParams({
       limit: String(query.pageSize),
       page: String(query.page),
@@ -432,13 +435,18 @@ export class DesktopCatalog {
       value.total < 0
     )
       throw new Error('invalid');
+    const total = value.total as number;
+    const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
+    if (query.page > totalPages) {
+      return this.packagesPage({ ...query, page: totalPages }, signal);
+    }
     const packages = value.items as SkillPackage[];
     const summaries = await this.summaries(packages, signal);
     return {
       packages,
       summaries,
-      total: value.total as number,
-      query,
+      total,
+      query: { ...query, page: Math.min(query.page, totalPages) },
     } satisfies MarketPage;
   }
 
@@ -684,7 +692,10 @@ export class DesktopCatalog {
       if (!this.pendingPlugin && !this.waitingForPlugin)
         this.pluginOperation = undefined;
       this.schedulePluginPoll();
+      const next = this.queuedWork;
+      this.queuedWork = undefined;
       this.emit();
+      if (next && !signal.aborted) void this.run(next);
     }
   }
 

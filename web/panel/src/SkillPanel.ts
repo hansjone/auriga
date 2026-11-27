@@ -99,6 +99,8 @@ export class SkillPanel {
     this.desktop?.listeners.delete(this.syncDesktop);
     this.closeSortMenu(false);
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchWrap = undefined;
+    this.searchInput = undefined;
     this.epoch++;
     this.controller?.abort();
   }
@@ -144,15 +146,6 @@ export class SkillPanel {
       this.total = page.total;
       this.page = page.query.page;
       this.pageSize = page.query.pageSize;
-      const totalPages = Math.max(
-        1,
-        Math.ceil(page.total / page.query.pageSize),
-      );
-      if (page.query.page > totalPages) {
-        this.page = totalPages;
-        void this.load({ force: true });
-        return;
-      }
     } else if (snapshot) {
       const kinds = this.activeKinds();
       this.packages = kinds.flatMap((kind) => snapshot.market[kind].packages);
@@ -262,7 +255,7 @@ export class SkillPanel {
   }
 
   private pluginProgress() {
-    if (this.kind !== 'plugin' || !this.desktop) return;
+    if (!this.desktop) return;
     const operation = this.desktop.pluginOperation;
     if (!operation) return;
     const phase: Record<string, [string, string]> = {
@@ -293,18 +286,23 @@ export class SkillPanel {
     packageId: string,
     row?: Installation,
     versionId?: string,
+    kind: 'plugin' | 'skill' = this.kind,
   ) {
     return (
-      this.kind === 'plugin' &&
+      kind === 'plugin' &&
       (this.desktop?.isTrackingPlugin(packageId) ||
         (row &&
           row.resource.identity.versionId === versionId &&
           ['applying', 'pending_restart'].includes(row.state)))
     );
   }
-  private retryPluginInstall(row: Installation | undefined, versionId: string) {
+  private retryPluginInstall(
+    row: Installation | undefined,
+    versionId: string,
+    kind: 'plugin' | 'skill' = this.kind,
+  ) {
     return (
-      this.kind === 'plugin' &&
+      kind === 'plugin' &&
       row?.state === 'failed' &&
       row.resource.identity.versionId === versionId &&
       (row.resource.desiredState ??
@@ -737,7 +735,15 @@ export class SkillPanel {
     return filters;
   }
 
+  private searchWrap?: HTMLElement;
+  private searchInput?: HTMLInputElement;
+
   private searchControl() {
+    if (this.searchWrap && this.searchInput) {
+      if (this.searchInput.value !== this.search)
+        this.searchInput.value = this.search;
+      return this.searchWrap;
+    }
     const wrap = element('div', undefined, 'market-search');
     const icon = element('span', undefined, 'market-search-icon');
     icon.setAttribute('aria-hidden', 'true');
@@ -756,16 +762,8 @@ export class SkillPanel {
       this.search = search.value;
       this.page = 1;
       if (this.searchTimer) clearTimeout(this.searchTimer);
-      const seq = ++this.searchSeq;
-      const { selectionStart, selectionEnd } = search;
       this.searchTimer = setTimeout(() => {
-        void this.load({ force: true }).then(() => {
-          if (seq !== this.searchSeq) return;
-          const updated =
-            this.root.querySelector<HTMLInputElement>('input[type=search]');
-          updated?.focus();
-          updated?.setSelectionRange(selectionStart, selectionEnd);
-        });
+        void this.load({ force: true });
       }, 300);
     };
     search.oninput = (event) => {
@@ -773,6 +771,8 @@ export class SkillPanel {
     };
     search.addEventListener('compositionend', searchChanged);
     wrap.append(icon, search);
+    this.searchWrap = wrap;
+    this.searchInput = search;
     return wrap;
   }
 
@@ -1067,10 +1067,11 @@ export class SkillPanel {
     row: Installation | undefined,
     version: Version | undefined,
   ) {
+    const kind = this.resourceKind(pack);
     const defaultId = version?.id ?? pack.defaultVersionId;
     const defaultVersion = version?.version ?? pack.market?.version;
     if (!defaultId || !defaultVersion) return undefined;
-    const retry = this.retryPluginInstall(row, defaultId);
+    const retry = this.retryPluginInstall(row, defaultId, kind);
     const installed = !!row;
     const label = retry
       ? this.text('重试', 'Retry')
@@ -1080,16 +1081,9 @@ export class SkillPanel {
     const button = this.button(
       label,
       () =>
-        this.action(
-          pack.id,
-          defaultId,
-          'install',
-          undefined,
-          undefined,
-          this.resourceKind(pack),
-        ),
+        this.action(pack.id, defaultId, 'install', undefined, undefined, kind),
       !this.sharedAvailable ||
-        this.pluginInProgress(pack.id, row, defaultId) ||
+        this.pluginInProgress(pack.id, row, defaultId, kind) ||
         (version && version.state !== 'published'),
     );
     button.className = installed || retry ? 'primary' : 'secondary';
@@ -1322,8 +1316,9 @@ export class SkillPanel {
           this.badge(this.status(version.state)),
         );
         const installed = this.installation(pack.id);
+        const kind = this.resourceKind(pack);
         const action = this.button(
-          this.retryPluginInstall(installed, version.id)
+          this.retryPluginInstall(installed, version.id, kind)
             ? this.text('重试此版本', 'Retry this version')
             : this.text('安装此精确版本', 'Install this exact version'),
           () =>
@@ -1333,11 +1328,11 @@ export class SkillPanel {
               'install',
               undefined,
               undefined,
-              this.resourceKind(pack),
+              kind,
             ),
           version.state !== 'published' ||
             !this.sharedAvailable ||
-            this.pluginInProgress(pack.id, installed, version.id),
+            this.pluginInProgress(pack.id, installed, version.id, kind),
         );
         action.className = 'primary';
         header.append(label, action);

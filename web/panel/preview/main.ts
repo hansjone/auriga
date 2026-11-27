@@ -1,8 +1,5 @@
 import { registerPanel } from '../src/index';
-import {
-  filterPlugins,
-  type MarketSort,
-} from '../../shared/src/plugin-market';
+import { filterPlugins, type MarketSort } from '../../shared/src/plugin-market';
 
 registerPanel();
 
@@ -215,7 +212,10 @@ function pagePackages(query: URLSearchParams) {
   };
 }
 
-async function fakeCatalog(path: string, init?: RequestInit): Promise<Response> {
+async function fakeCatalog(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
   const url = path.replace(/^catalog\//, '');
   if (url === 'installations') return json(installed);
   if (url.startsWith('packages?')) {
@@ -223,9 +223,7 @@ async function fakeCatalog(path: string, init?: RequestInit): Promise<Response> 
     if (query.has('page')) return json(pagePackages(query));
     const kind = query.get('kind');
     return json({
-      items: kind
-        ? catalog.filter((pack) => pack.kind === kind)
-        : catalog,
+      items: kind ? catalog.filter((pack) => pack.kind === kind) : catalog,
     });
   }
   const star = url.match(/^packages\/([^/]+)\/star$/);
@@ -276,7 +274,8 @@ async function fakeCatalog(path: string, init?: RequestInit): Promise<Response> 
       },
       digest: 'sha256:' + 'a'.repeat(64),
     };
-    if (url.endsWith('/versions/' + pack.defaultVersionId)) return json(version);
+    if (url.endsWith('/versions/' + pack.defaultVersionId))
+      return json(version);
     return json({ items: [version] });
   }
   return json({ items: [] });

@@ -168,8 +168,7 @@ export class AurigaTeamPanel extends HTMLElement {
       return;
     }
     this.root.append(this.content);
-    const key =
-      this.tab === 'market' ? 'market' : 'mine:' + this.kind;
+    const key = this.tab === 'market' ? 'market' : 'mine:' + this.kind;
     if (!this.view || this.viewKey !== key) {
       this.view?.dispose();
       this.viewKey = key;

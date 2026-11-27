@@ -16,11 +16,13 @@ afterEach(() => {
 });
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 async function click(w: NativeWrapper, label: string) {
-  const b = w.findAll('button').find(
-    (b) =>
-      b.text().includes(label) ||
-      (b.element as HTMLButtonElement).getAttribute('aria-label') === label,
-  );
+  const b = w
+    .findAll('button')
+    .find(
+      (b) =>
+        b.text().includes(label) ||
+        (b.element as HTMLButtonElement).getAttribute('aria-label') === label,
+    );
   expect(b, label).toBeDefined();
   await b!.trigger('click');
   await flushPromises();
@@ -130,7 +132,9 @@ function desktopFixture() {
   const fetch: NonNullable<PanelContext['fetch']> = (path, init) =>
     path.includes('kind=skill')
       ? Promise.resolve(
-          json(path.includes('page=') ? { items: [], total: 0 } : { items: [] }),
+          json(
+            path.includes('page=') ? { items: [], total: 0 } : { items: [] },
+          ),
         )
       : f.fetch(path, init);
   return { ...f, fetch };
@@ -157,8 +161,7 @@ it('loads plugin market metadata from later pages and scopes likes to the native
     if (path === 'catalog/packages/' + projected.id + '/star')
       return json({ starred: true, starCount: 3 });
     if (path.includes('catalog/packages?')) {
-      if (path.includes('kind=skill'))
-        return json({ items: [], total: 0 });
+      if (path.includes('kind=skill')) return json({ items: [], total: 0 });
       const params = new URLSearchParams(path.slice(path.indexOf('?') + 1));
       const search = (params.get('search') ?? '').toLowerCase();
       const items =
@@ -402,9 +405,7 @@ for (const kind of ['plugin', 'skill'] as const)
         action: 'install',
       });
       expect(r.init?.headers).toMatchObject({ 'x-auriga-catalog': '1' });
-      expect(
-        w.findAll('button').some((b) => b.text() === 'Update'),
-      ).toBe(true);
+      expect(w.findAll('button').some((b) => b.text() === 'Update')).toBe(true);
       expect(w.text()).not.toContain('Select version');
     });
     it('shows list metadata without old levels or version picker', async () => {

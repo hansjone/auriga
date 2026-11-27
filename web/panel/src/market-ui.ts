@@ -121,10 +121,7 @@ export function resourceHeading(
   svg.append(path);
   icon.append(svg);
   const title = element('div');
-  title.append(
-    element('h3', name),
-    element('span', label, 'resource-kind'),
-  );
+  title.append(element('h3', name), element('span', label, 'resource-kind'));
   header.append(icon, title);
   return header;
 }
