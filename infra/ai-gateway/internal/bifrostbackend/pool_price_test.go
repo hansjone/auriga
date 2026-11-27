@@ -10,7 +10,7 @@ import (
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 )
 
-func TestValidatePoolSaveEffectiveAtSkew(t *testing.T) {
+func TestNormalizePoolSaveEffectiveAtSkew(t *testing.T) {
 	base := api.RelayPool{
 		Id:              "skew-model",
 		Enabled:         true,
@@ -25,32 +25,48 @@ func TestValidatePoolSaveEffectiveAtSkew(t *testing.T) {
 		},
 	}
 	for _, tc := range []struct {
-		name    string
-		delta   time.Duration
-		wantErr bool
+		name      string
+		delta     time.Duration
+		wantErr   bool
+		wantClamp bool
 	}{
-		{"past", -2 * time.Second, false},
-		{"near-past", -200 * time.Millisecond, false},
-		{"now", 0, false},
-		{"50ms-lead", 50 * time.Millisecond, false},
-		{"1s-lead", time.Second, false},
-		{"under-skew", priceEffectiveSkew - time.Second, false},
-		{"at-skew", priceEffectiveSkew, false},
-		{"over-skew", priceEffectiveSkew + time.Second, true},
+		{"past", -2 * time.Second, false, false},
+		{"near-past", -200 * time.Millisecond, false, false},
+		{"now", 0, false, false},
+		{"50ms-lead", 50 * time.Millisecond, false, true},
+		{"1s-lead", time.Second, false, true},
+		{"under-skew", priceEffectiveSkew - time.Second, false, true},
+		{"at-skew", priceEffectiveSkew, false, true},
+		{"over-skew", priceEffectiveSkew + time.Second, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := base
-			pool.Price.EffectiveAt = time.Now().Add(tc.delta)
-			err := validatePoolSave(pool)
+			submitted := time.Now().Add(tc.delta)
+			pool.Price.EffectiveAt = submitted
+			before := time.Now()
+			err := normalizePoolSave(&pool)
+			after := time.Now()
 			if tc.wantErr {
 				var problem validationProblem
 				if !errors.As(err, &problem) || problem.field != "/price/effectiveAt" {
 					t.Fatalf("err=%v", err)
 				}
+				if !pool.Price.EffectiveAt.Equal(submitted) {
+					t.Fatal("rejected effectiveAt was mutated")
+				}
 				return
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.wantClamp {
+				if pool.Price.EffectiveAt.Before(before) || pool.Price.EffectiveAt.After(after) {
+					t.Fatalf("lead was not clamped to server now: %v", pool.Price.EffectiveAt)
+				}
+				return
+			}
+			if !pool.Price.EffectiveAt.Equal(submitted) {
+				t.Fatalf("past effectiveAt changed: %v", pool.Price.EffectiveAt)
 			}
 		})
 	}

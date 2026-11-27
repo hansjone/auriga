@@ -519,7 +519,7 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 	if err != nil {
 		return err
 	}
-	if err := validatePoolSave(p); err != nil {
+	if err := normalizePoolSave(&p); err != nil {
 		return err
 	}
 	providers, err := routeProviders(p.Routes)
@@ -566,7 +566,10 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 	})
 }
 
-func validatePoolSave(p api.RelayPool) error {
+// normalizePoolSave validates a pool document and clamps a slightly-future
+// effectiveAt (within priceEffectiveSkew) down to server now so save and later
+// budget admission share the same "not future" rule.
+func normalizePoolSave(p *api.RelayPool) error {
 	if !modelID.MatchString(p.Id) {
 		return invalidField("/id")
 	}
@@ -582,8 +585,12 @@ func validatePoolSave(p api.RelayPool) error {
 	if p.Price.Version == "" {
 		return invalidField("/price/version")
 	}
-	if p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now().Add(priceEffectiveSkew)) {
+	now := time.Now()
+	if p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(now.Add(priceEffectiveSkew)) {
 		return invalidField("/price/effectiveAt")
+	}
+	if p.Price.EffectiveAt.After(now) {
+		p.Price.EffectiveAt = now
 	}
 	if p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger {
 		return invalidField("/price/inputMicrosPerMillionTokens")

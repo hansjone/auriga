@@ -374,6 +374,16 @@ async function run() {
                   : isApiError(e) && e.status === 429
                     ? t('limited')
                     : t('importWriteUnknown');
+        // Definite effectiveAt rejection: drop the frozen body so retry remints
+        // a fresh slightly-past timestamp after clocks are corrected.
+        if (
+          isApiError(e) &&
+          e.status === 400 &&
+          e.problem.params?.field === '/price/effectiveAt'
+        ) {
+          row.body = undefined;
+          row.attempted = false;
+        }
         if (signal.aborted || (isApiError(e) && [401, 403].includes(e.status)))
           break;
       }

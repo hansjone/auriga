@@ -310,6 +310,9 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		if err != nil {
 			return err
 		}
+		if err = normalizePoolSave(&p); err != nil {
+			return err
+		}
 		if createOnly {
 			err = b.CreatePool(r.Context(), tenant, p)
 		} else {

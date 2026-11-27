@@ -453,7 +453,7 @@ it.each([
     w.unmount();
   },
 );
-it('shows a concrete message for rejected effectiveAt instead of unconfirmed save', async () => {
+it('shows a concrete message for rejected effectiveAt and remints on retry', async () => {
   vi.mocked(relayApi.createPool).mockRejectedValue(
     new ApiError({
       status: 400,
@@ -468,14 +468,21 @@ it('shows a concrete message for rejected effectiveAt instead of unconfirmed sav
   await flushPromises();
   expect(w.text()).toContain('计价生效时间不被服务器接受');
   expect(w.text()).not.toContain('未确认保存结果');
-  expect(
-    vi.mocked(relayApi.createPool).mock.calls[0][0].price.effectiveAt,
-  ).toEqual(expect.any(String));
-  const submitted = Date.parse(
-    vi.mocked(relayApi.createPool).mock.calls[0][0].price.effectiveAt,
-  );
+  const first = vi.mocked(relayApi.createPool).mock.calls[0][0].price
+    .effectiveAt;
+  expect(first).toEqual(expect.any(String));
+  const submitted = Date.parse(first);
   expect(Date.now() - submitted).toBeGreaterThanOrEqual(50_000);
   expect(Date.now() - submitted).toBeLessThan(120_000);
+  await w.get('[name="importConfirmed"]').setValue(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  // prepare() selects two models; each run attempts both after reminting bodies.
+  expect(relayApi.createPool).toHaveBeenCalledTimes(4);
+  const retried = vi.mocked(relayApi.createPool).mock.calls[2][0].price
+    .effectiveAt;
+  expect(Date.now() - Date.parse(retried)).toBeGreaterThanOrEqual(50_000);
+  expect(Date.now() - Date.parse(retried)).toBeLessThan(120_000);
   w.unmount();
 });
 it('shows generic invalid for other definite 400 rejections', async () => {
