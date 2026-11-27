@@ -655,7 +655,11 @@ function recoverPluginProfile(target, dataHome) {
     let config;
     try {
       config = parse(readFileSync(patch, 'utf8'))?.findLast(
-        (row) => row?.id === PLUGIN && !row.insert && row.config,
+        (row) =>
+          row?.id === PLUGIN &&
+          !row.insert &&
+          (!row.name || row.name === PLUGIN) &&
+          row.config,
       )?.config;
     } catch {
       /* The original patch is preserved in the transaction's backup. */
@@ -980,10 +984,11 @@ function transition({
   apply,
   fault,
   dataOwner = from?.dataOwner,
+  backupLabel = from?.current ?? 'initial',
 }) {
   const profile = profileDir(dataHome);
   const profileExisted = existsSync(profile);
-  const label = from?.current ?? 'initial';
+  const label = backupLabel;
   if (profileExisted) snapshotProfile(dataHome, label);
   const txn = {
     phase: 'prepare',
@@ -1463,6 +1468,9 @@ function installStopped({
     profile: false,
   };
   const firstInstall = !existing;
+  const recoveryBackup = recoverPlugins
+    ? 'plugin-recovery-' + randomUUID()
+    : undefined;
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
@@ -1553,6 +1561,7 @@ function installStopped({
       target,
       fault,
       dataOwner,
+      backupLabel: recoveryBackup,
       apply() {
         progress('profile', 0);
         created.profile = !existsSync(profileDir(dataHome));
@@ -1582,7 +1591,14 @@ function installStopped({
   progress('done', 1);
   if (selectedBinding && (explicitConfirmation || !previousBinding))
     writeJsonAtomic(bindingFile, selectedBinding);
-  return { id, previous, upgraded: Boolean(previous && previous !== id) };
+  return {
+    id,
+    previous,
+    upgraded: Boolean(previous && previous !== id),
+    ...(recoveryBackup && {
+      profileBackup: completeSnapshot(dataHome, recoveryBackup),
+    }),
+  };
 }
 
 /** Switch back to the previous version and restore its plugin files. */

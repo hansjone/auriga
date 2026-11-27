@@ -8,6 +8,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -197,9 +198,28 @@ test('missing offline dependencies undo the migration and keep the previous vers
   assert.deepEqual(snapshot(f), before);
 });
 
+test('offline migration rejects a pnpm store link before changing the existing profile', (t) => {
+  const f = fixture(t);
+  installA(f);
+  const before = snapshot(f);
+  const outside = join(f.base, 'outside');
+  mkdirSync(outside);
+  symlinkSync(
+    outside,
+    join(f.dataHome, 'pnpm-store'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  assert.throws(
+    () => put(f, { name: 'next', pluginVersion: '1.1.0', isolated: true }),
+    /guardian path contains a link/,
+  );
+  assert.deepEqual(readdirSync(outside), []);
+  assert.deepEqual(snapshot(f), before);
+});
+
 test('explicit offline profile recovery preserves the unusable original and user state', (t) => {
   const f = fixture(t);
-  const old = put(f, { name: 'old' });
+  put(f, { name: 'old' });
   const profile = profileDir(f.dataHome);
   writeFileSync(join(profile, 'package.json'), '{broken');
   rmSync(join(profile, 'cordis.patch.yml'));
@@ -212,15 +232,19 @@ test('explicit offline profile recovery preserves the unusable original and user
   assert.equal(readState(f.root).current, next.id);
   assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
   assert.equal(text(join(profile, 'user-state.txt')), 'preserved');
-  const backup = join(
-    f.dataHome,
-    'profile-backups',
-    'auriga',
-    old.id,
-    'profile',
-  );
+  const backup = next.profileBackup;
   assert.equal(text(join(backup, 'package.json')), '{broken');
   assert.ok(existsSync(join(backup, 'node_modules/auriga-dsh/package.json')));
+
+  rmSync(join(profile, 'cordis.patch.yml'));
+  const second = put(
+    f,
+    { name: 'next', pluginVersion: '1.1.0', isolated: true },
+    { recoverPlugins: true },
+  );
+  assert.equal(second.id, next.id);
+  assert.notEqual(second.profileBackup, backup);
+  assert.equal(text(join(backup, 'package.json')), '{broken');
 });
 
 test('fresh install seeds profile, plugin, ownership marker and platform address', (t) => {

@@ -9,21 +9,13 @@ import { desktopPnpmLayout } from './desktop-pnpm-layout.mjs';
 const [dataHome, ...args] = process.argv.slice(2);
 const profile = resolve(dataHome, 'profiles/auriga');
 const store = resolve(dataHome, 'pnpm-store');
-for (const path of [
-  profile,
-  store,
-  join(profile, 'package.json'),
-  join(profile, 'pnpm-lock.yaml'),
-  join(profile, 'pnpm-workspace.yaml'),
-  join(profile, 'node_modules/.pnpm'),
-])
-  assertLocalPath(path);
 const samePath = (left, right) =>
   process.platform === 'win32'
     ? left.toLowerCase() === right.toLowerCase()
     : left === right;
 if (!samePath(process.cwd(), profile))
   throw new Error('desktop package manager must run in its own profile');
+const layout = desktopPnpmLayout(profile, store);
 
 const manifest = join(profile, 'package.json');
 const dependencies = () => {
@@ -39,11 +31,11 @@ const before = installing ? dependencies() : {};
 const pnpm = fileURLToPath(
   new URL('../../tools/pnpm/node_modules/pnpm/bin/pnpm.cjs', import.meta.url),
 );
-const result = spawnSync(
-  process.execPath,
-  [pnpm, ...desktopPnpmLayout(profile, store), ...args],
-  { cwd: profile, stdio: 'inherit', windowsHide: true },
-);
+const result = spawnSync(process.execPath, [pnpm, ...layout, ...args], {
+  cwd: profile,
+  stdio: 'inherit',
+  windowsHide: true,
+});
 if (result.error) throw result.error;
 if (installing) {
   const after = dependencies();
