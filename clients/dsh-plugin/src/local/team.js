@@ -258,10 +258,18 @@ export function createTeam({
     return output.body?.streamId ? value.result : value;
   }
   /** @param {string} sessionId @param {string} [threadId] @param {AbortSignal} [signal] */
+  async function rememberPrimary(/** @type {string} */ sessionId) {
+    primarySession = sessionId;
+    if (vault.snapshot().primarySession === sessionId) return;
+    await vault.update((state) => {
+      active();
+      state.primarySession = sessionId;
+    });
+  }
   async function binding(sessionId, threadId, signal) {
     if (!opaque(sessionId)) throw new Error('real DSH session required');
     const endpointId = await endpoint(sessionId);
-    primarySession = sessionId;
+    await rememberPrimary(sessionId);
     const result = await privateCall(
       'bind',
       {
@@ -626,7 +634,7 @@ export function createTeam({
     },
     async activateSession(/** @type {string} */ sessionId) {
       await endpoint(sessionId);
-      primarySession = sessionId;
+      await rememberPrimary(sessionId);
     },
     toolCall,
     receive,
@@ -656,8 +664,10 @@ export function createTeam({
       );
       // After rebuild (auth self-heal), rebind a still-live host session so
       // receive polling resumes without waiting for the next tool call.
+      // vault.primarySession covers tools that never opened a durable thread.
       const state = vault.snapshot();
       const candidates = [
+        state.primarySession,
         ...Object.values(state.threads ?? {}).map(
           (/** @type {any} */ row) => row?.sessionId,
         ),
@@ -665,12 +675,12 @@ export function createTeam({
           (/** @type {any} */ row) => row?.sessionId,
         ),
       ].filter((id) => typeof id === 'string' && id);
-      for (const sessionId of candidates) {
+      for (const sessionId of new Set(candidates)) {
         if (closed) break;
         if (!ctx.sessions?.get?.(sessionId)) continue;
         try {
           await endpoint(sessionId);
-          primarySession = sessionId;
+          await rememberPrimary(sessionId);
           break;
         } catch {
           /* try the next durable session */

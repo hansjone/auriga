@@ -1990,6 +1990,9 @@ window.__ModuleLoader__.load({
         let desktopCatalog;
         let shellReadSequence = 0;
         let latestShellRead = 0;
+        // Local logout fence: ignore authenticated status/catalog while the
+        // explicit sign-out round-trip is outstanding (hang or 503).
+        let shellSignOutFence = 0;
         const verifiedPanel = () => {
           const panel = customElements.get(ELEMENT);
           return panel && loadedPanels.has(panel) ? panel : undefined;
@@ -2005,6 +2008,7 @@ window.__ModuleLoader__.load({
             sequence <= latestShellRead
           )
             return;
+          if (shellSignOutFence && status.loggedIn) return;
           latestShellRead = sequence;
           // Marketplace cache is resident until explicit sign-out. Transient
           // offline / reauth must not clearCatalog or force a full prefetch.
@@ -2121,6 +2125,23 @@ window.__ModuleLoader__.load({
               if (live && !disposed && revision.current === started) {
                 if (shellRead && next) updateDesktopCatalog(next, shellRead);
                 setValue((previous) => {
+                  if (
+                    path === 'auriga/shell/status' &&
+                    shellSignOutFence &&
+                    next?.loggedIn
+                  )
+                    return previous?.loggedIn === false
+                      ? previous
+                      : {
+                          available: true,
+                          loggedIn: false,
+                          connected: false,
+                          recovering: false,
+                          account: null,
+                          platform: 'signed_out',
+                          csrf: previous?.csrf ?? next?.csrf,
+                          brokerAvailable: previous?.brokerAvailable,
+                        };
                   if (next) return next;
                   // Keep resident account fields across poll failures, but mark
                   // soft-offline so Team/actions do not stay falsely ready.
@@ -3030,7 +3051,8 @@ window.__ModuleLoader__.load({
             intent.current = action === 'cancel_login' ? 'cancel' : action;
             setBusy(true);
             setOutcome('');
-            if (action === 'logout') {
+            const signOut = action === 'logout' ? ++shellSignOutFence : 0;
+            if (signOut) {
               // Drop resident account/market before the remote round-trip so a
               // hung or 503 logout cannot leave the previous identity on screen.
               updateDesktopCatalog({ loggedIn: false }, ++shellReadSequence);
@@ -3056,6 +3078,8 @@ window.__ModuleLoader__.load({
               })
               .finally(() => {
                 if (disposed) return;
+                if (signOut && shellSignOutFence === signOut)
+                  shellSignOutFence = 0;
                 setBusy(false);
                 reloadShell();
               });
