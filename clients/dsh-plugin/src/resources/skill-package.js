@@ -75,21 +75,22 @@ function collisionKey(path) {
 }
 
 /** @param {string} path */
-function extensionLower(path) {
+function extensionExact(path) {
   const slash = path.lastIndexOf('/');
   const dot = path.lastIndexOf('.');
-  return dot > slash ? path.slice(dot).toLowerCase() : '';
+  return dot > slash ? path.slice(dot) : '';
 }
 
 /** @param {string} path */
 export function skillPathValid(path) {
-  const ext = extensionLower(path);
+  const extExact = extensionExact(path);
+  const extLower = extExact.toLowerCase();
   const allowed =
     path === 'SKILL.md' ||
     skillRootDependencyFiles.has(path) ||
     ((path.startsWith('references/') || path.startsWith('assets/')) &&
-      docExtensions.has(ext)) ||
-    (path.startsWith('scripts/') && scriptExtensions.has(ext));
+      docExtensions.has(extExact)) ||
+    (path.startsWith('scripts/') && scriptExtensions.has(extLower));
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&

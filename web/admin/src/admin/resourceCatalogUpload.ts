@@ -104,7 +104,8 @@ export async function packSkillFolder(files: File[]): Promise<File> {
       parts = path.split('/');
     const slash = path.lastIndexOf('/');
     const dot = path.lastIndexOf('.');
-    const ext = dot > slash ? path.slice(dot).toLowerCase() : '';
+    const extExact = dot > slash ? path.slice(dot) : '';
+    const ext = extExact.toLowerCase();
     const allowedSkillPath =
       path === 'SKILL.md' ||
       [
@@ -115,7 +116,7 @@ export async function packSkillFolder(files: File[]): Promise<File> {
         'poetry.lock',
       ].includes(path) ||
       ((path.startsWith('references/') || path.startsWith('assets/')) &&
-        ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)) ||
+        ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)) ||
       (path.startsWith('scripts/') &&
         [
           '.py',

@@ -609,7 +609,8 @@ export async function parseResourceSource(
       if (systemFile(e.path)) fail('systemFile', e.path);
       const slash = e.path.lastIndexOf('/');
       const dot = e.path.lastIndexOf('.');
-      const ext = dot > slash ? e.path.slice(dot).toLowerCase() : '';
+      const extExact = dot > slash ? e.path.slice(dot) : '';
+      const ext = extExact.toLowerCase();
       const allowedSkillPath =
         e.path === 'SKILL.md' ||
         [
@@ -620,7 +621,7 @@ export async function parseResourceSource(
           'poetry.lock',
         ].includes(e.path) ||
         ((e.path.startsWith('references/') || e.path.startsWith('assets/')) &&
-          ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)) ||
+          ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)) ||
         (e.path.startsWith('scripts/') &&
           [
             '.py',

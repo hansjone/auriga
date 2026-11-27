@@ -260,7 +260,8 @@ export function createPrivateSkills({ home }) {
         } else {
           const slash = path.lastIndexOf('/');
           const dot = path.lastIndexOf('.');
-          const ext = dot > slash ? path.slice(dot).toLowerCase() : '';
+          const extExact = dot > slash ? path.slice(dot) : '';
+          const ext = extExact.toLowerCase();
           if (
             !stat.isFile() ||
             stat.size > 2097152 ||
@@ -276,7 +277,7 @@ export function createPrivateSkills({ home }) {
               !(
                 (path.startsWith('references/') ||
                   path.startsWith('assets/')) &&
-                ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)
+                ['.md', '.txt', '.json', '.yaml', '.yml'].includes(extExact)
               ) &&
               !(
                 path.startsWith('scripts/') &&

@@ -26,22 +26,23 @@ public final class SkillArchiveValidator {
     INVALID
   }
 
-  private static String extensionLower(String path) {
+  private static String extensionExact(String path) {
     int slash = path.lastIndexOf('/');
     int dot = path.lastIndexOf('.');
-    return dot > slash ? path.substring(dot).toLowerCase(Locale.ROOT) : "";
+    return dot > slash ? path.substring(dot) : "";
   }
 
   private static SkillFileClass classifySkillFile(String path) {
     if (path.equals("SKILL.md")) return SkillFileClass.ENTRY;
     if (ROOT_DEPENDENCY_FILES.contains(path)) return SkillFileClass.SCRIPT_OR_DEP;
-    String ext = extensionLower(path);
+    String extExact = extensionExact(path);
     if (path.startsWith("references/") || path.startsWith("assets/")) {
-      return switch (ext) {
+      return switch (extExact) {
         case ".md", ".txt", ".json", ".yaml", ".yml" -> SkillFileClass.DOC;
         default -> SkillFileClass.INVALID;
       };
     }
+    String ext = extExact.toLowerCase(Locale.ROOT);
     if (path.startsWith("scripts/")) {
       return switch (ext) {
         case ".py",
