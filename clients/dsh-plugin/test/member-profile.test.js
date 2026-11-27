@@ -201,7 +201,9 @@ test('runtime emits the same profile binding for shell and local-UAC association
   await nextTurn();
   const changed = f.runtime.status(f.request).account;
   assert.notEqual(changed.profileBinding, initial);
-  assert.notEqual(changed.catalogGeneration, account.catalogGeneration);
+  // Catalog fence is member/device identity only; UAC generation remints must
+  // not bust the marketplace cache (token self-heal / authGeneration bump).
+  assert.equal(changed.catalogGeneration, account.catalogGeneration);
   assert.equal(
     f.runtime.platformIdentity().profileBinding,
     changed.profileBinding,

@@ -150,8 +150,7 @@ export async function createBroker({
     const sameOrTransientUnreachable = (/** @type {any} */ next) => {
       if (sameAuthenticatedIdentity(snapBefore, next)) return true;
       return (
-        !stateFactory &&
-        sameRecoveringSession(next, anchorAuthKey, snapBefore)
+        !stateFactory && sameRecoveringSession(next, anchorAuthKey, snapBefore)
       );
     };
     const verify = () => {
@@ -203,7 +202,11 @@ export async function createBroker({
     /** @type {string|null} */ anchorKey,
     /** @type {any} */ anchorSnap,
   ) => {
-    if (!transientRecoverable(snap) || !anchorSnap || !lastAuthenticatedSnapshot)
+    if (
+      !transientRecoverable(snap) ||
+      !anchorSnap ||
+      !lastAuthenticatedSnapshot
+    )
       return false;
     const retained =
       anchorSnap.state === 'authenticated'
@@ -250,9 +253,8 @@ export async function createBroker({
     if (stateFactory) throw unavailable('common.unauthenticated');
     const anchorSnap = lastAuthenticatedSnapshot;
     const anchorKey =
-      (initial?.state === 'unreachable'
-        ? state.authorization?.()
-        : null) ?? lastAuthenticatedKey;
+      (initial?.state === 'unreachable' ? state.authorization?.() : null) ??
+      lastAuthenticatedKey;
     if (
       !transientRecoverable(initial) ||
       !anchorKey ||
@@ -434,11 +436,7 @@ export async function createBroker({
           const stillSameSession =
             matchesAnchor(cur) ||
             (!stateFactory &&
-              sameRecoveringSession(
-                cur,
-                anchor.anchorKey,
-                anchor.anchorSnap,
-              ));
+              sameRecoveringSession(cur, anchor.anchorKey, anchor.anchorSnap));
           if (!stillSameSession) throw error;
         }
         if (result.error)
