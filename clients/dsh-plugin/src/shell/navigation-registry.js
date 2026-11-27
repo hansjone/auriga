@@ -160,6 +160,7 @@ export function readActivityBarExpanded(storage = globalThis.localStorage) {
   }
 }
 
+/** @param {boolean} expanded @param {{setItem?:(key:string,value:string)=>void}|null} [storage] */
 export function writeActivityBarExpanded(
   expanded,
   storage = globalThis.localStorage,

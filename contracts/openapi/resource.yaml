@@ -5722,7 +5722,7 @@
             "name": "sort",
             "in": "query",
             "required": false,
-            "description": "Market sort. Empty or omitted keeps default catalog order. Only with page.",
+            "description": "Market sort. Omit the parameter to keep default catalog order. Only with page.",
             "schema": {
               "type": "string",
               "enum": [

@@ -139,6 +139,7 @@ try {
     customElements: host.window.customElements,
     document: host.document,
     CustomEvent: host.window.CustomEvent,
+    ShadowRoot: host.window.ShadowRoot,
     AbortController: globalThis.AbortController,
     URLSearchParams: globalThis.URLSearchParams,
     setTimeout,

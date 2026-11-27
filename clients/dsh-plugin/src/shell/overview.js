@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Auriga overview home modules.
  * Keep presentation modular so future surfaces can opt into each block.

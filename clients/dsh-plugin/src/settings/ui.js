@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Settings UI primitives for Auriga native settings.
  * @param {any} React

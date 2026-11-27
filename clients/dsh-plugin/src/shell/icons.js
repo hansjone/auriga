@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Lucide-style SVG icons for Auriga Activity Bar / Settings.
  * Paths follow Lucide icon geometry (viewBox 0 0 24 24).

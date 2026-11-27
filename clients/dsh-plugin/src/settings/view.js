@@ -2235,10 +2235,8 @@ export function createSettingsView(
         display: provided ? field.value : t.notProvided,
       };
     });
-    const copyText = async (
-      /** @type {string} */ value,
-      /** @type {string=} */ key,
-    ) => {
+    /** @param {string} value @param {string} [key] */
+    const copyText = async (value, key) => {
       try {
         if (navigator.clipboard?.writeText)
           await navigator.clipboard.writeText(value);
@@ -2254,7 +2252,10 @@ export function createSettingsView(
         if (key) {
           setCopiedKey(key);
           setTimeout(
-            () => setCopiedKey((current) => (current === key ? '' : current)),
+            () =>
+              setCopiedKey((/** @type {string} */ current) =>
+                current === key ? '' : current,
+              ),
             1500,
           );
         }

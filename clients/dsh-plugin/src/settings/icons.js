@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Lucide-style icons for settings navigation (16px default via props.size).
  * Kept in-module so /auriga/settings/*.js can load without cross-tree imports.

@@ -98,7 +98,7 @@ export function createShellUiHandler({ auth, uiOrigin }) {
       (req.headers.origin && !sameOrigin)
     )
       return reject(403, 'forbidden');
-    const path = req.url?.split('?')[0];
+    const path = req.url?.split('?')[0] ?? '';
     const file = ASSETS.get(path);
     if (!file) return reject(404, 'missing');
     const body = await readFile(new URL(file, import.meta.url));

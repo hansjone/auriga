@@ -897,17 +897,17 @@ export class SkillPanel {
         '共 ' + this.total + ' 个资源',
         this.total + ' resources',
       );
+    const tools = this.chromeEl.querySelector('.market-toolbar-tools');
+    const oldSort = tools?.querySelector('.market-sort');
+    if (tools) {
+      const next = this.sortControl();
+      if (oldSort) oldSort.replaceWith(next);
+      else tools.prepend(next);
+    }
     const refresh = this.chromeEl.querySelector<HTMLButtonElement>(
       'button.resource-refresh',
     );
     if (refresh) refresh.disabled = this.pending;
-    const sort = this.chromeEl.querySelector<HTMLButtonElement>(
-      '.market-sort-trigger',
-    );
-    if (sort) {
-      sort.disabled = this.pending;
-      sort.setAttribute('aria-expanded', String(this.sortMenuOpen));
-    }
   }
 
   private marketChrome() {
@@ -1186,17 +1186,16 @@ export class SkillPanel {
     const marketList = !this.mine && !this.selected;
     const rootNode = this.root.getRootNode();
     const active =
-      rootNode instanceof ShadowRoot
+      typeof ShadowRoot !== 'undefined' && rootNode instanceof ShadowRoot
         ? rootNode.activeElement
         : document.activeElement;
     const searchFocused = !!this.searchInput && active === this.searchInput;
-    // Keep the list chrome mounted for ordinary result updates. Rebuild when
-    // leaving the list or when the sort menu needs a fresh render pass.
+    // Keep list chrome mounted across result updates; syncMarketChrome refreshes
+    // kind/count/sort (including open/closed menu) without remounting search.
     const keepChrome =
       marketList &&
       !!this.chromeEl &&
-      this.chromeEl.parentElement === this.root &&
-      !this.sortMenuOpen;
+      this.chromeEl.parentElement === this.root;
     if (keepChrome) {
       while (this.chromeEl!.nextSibling) this.chromeEl!.nextSibling.remove();
       this.syncMarketChrome();
