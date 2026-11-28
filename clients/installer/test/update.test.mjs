@@ -1562,3 +1562,147 @@ test('writeAtomic retries transient EPERM/EBUSY renames and cleans temp files on
   );
   assert.deepEqual(readdirSync(base), ['current.txt']);
 });
+
+test('已排队更新在服务端撤回时 check() 自动清理；重启瞬间遇更高正常版本允许完成切换并入队新版', async (t) => {
+  const f = fixture(t);
+  const v2 = signed({ packageId: f.next.id, version: '2.0.0', sequence: 2 });
+  const v3 = signed({
+    packageId: 'package-3',
+    version: '2.1.0',
+    sequence: 3,
+    minimumVersion: '1.0.0',
+  });
+  let mode = 'v2';
+  const request = async (url) => {
+    if (/\/latest(?:\?|$)/.test(url)) {
+      if (mode === 'withdrawn') return new Response('', { status: 404 });
+      return new Response(JSON.stringify(mode === 'v3' ? v3 : v2));
+    }
+    return new Response('zip');
+  };
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  assert.equal(updater.status().restartRequired, true);
+  assert.equal(updater.status().pendingVersion, '2.0.0');
+
+  // 服务端撤回（404）后，后台 check() 自动清理待装队列
+  mode = 'withdrawn';
+  const afterWithdraw = await updater.check();
+  assert.equal(afterWithdraw.restartRequired, false);
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+
+  // 重新排队 v2，重启瞬间服务端刚发布更高的正常迭代 v2.1.0 -> 允许先完成 v2 切换，并把 v2.1.0 记入 available
+  mode = 'v2';
+  await updater.check();
+  await updater.update();
+  mode = 'v3';
+  const applied = await applyPending(f.root, {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    smoke: () => {},
+    extract: () => f.next.dir,
+  });
+  assert.equal(applied, true);
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(readUpdateState(f.root).available.version, '2.1.0');
+});
+
+test('重启瞬间撞上回滚源或提高 minimumVersion 严格拒绝；撞上零灰度新版不绕过灰度写入 available', async (t) => {
+  // 1. 回滚源与提高 minimumVersion 均拒绝
+  for (const kind of ['rollback', 'minVersion']) {
+    const f = fixture(t);
+    const v2 = signed({
+      schema: 2,
+      rolloutPercentage: 100,
+      rollbackFrom: null,
+      packageId: f.next.id,
+      version: '2.0.0',
+      sequence: 2,
+    });
+    const replacement =
+      kind === 'rollback'
+        ? signed({
+            schema: 2,
+            rolloutPercentage: 100,
+            rollbackFrom: '2.0.0',
+            packageId: 'package-3',
+            version: '2.1.0',
+            sequence: 3,
+          })
+        : signed({
+            schema: 2,
+            rolloutPercentage: 100,
+            rollbackFrom: null,
+            packageId: 'package-3',
+            version: '2.1.0',
+            minimumVersion: '2.1.0',
+            sequence: 3,
+          });
+    let switched = false;
+    const request = async (url) => {
+      if (/\/latest(?:\?|$)/.test(url))
+        return new Response(JSON.stringify(switched ? replacement : v2));
+      return new Response('zip');
+    };
+    const updater = resumedUpdater(f, request, { defer: true });
+    await updater.check();
+    await updater.update();
+    switched = true;
+    await assert.rejects(
+      applyPending(f.root, {
+        publicKey: keys.publicKey,
+        now,
+        request,
+        smoke: () => {},
+        extract: () => f.next.dir,
+      }),
+      /replaced/,
+    );
+    assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+    assert.equal(readState(f.root).current, f.old.id);
+  }
+
+  // 2. 撞上零灰度更高正常版：允许完成当前 v2 切换，但不绕过灰度把 v2.1.0 写入 available
+  const f = fixture(t);
+  const v2 = signed({
+    schema: 2,
+    rolloutPercentage: 100,
+    rollbackFrom: null,
+    packageId: f.next.id,
+    version: '2.0.0',
+    sequence: 2,
+  });
+  const v3ZeroRollout = signed({
+    schema: 2,
+    rolloutPercentage: 0,
+    rollbackFrom: null,
+    packageId: 'package-3',
+    version: '2.1.0',
+    minimumVersion: '1.0.0',
+    sequence: 3,
+  });
+  let switched = false;
+  const request = async (url) => {
+    if (/\/latest(?:\?|$)/.test(url))
+      return new Response(JSON.stringify(switched ? v3ZeroRollout : v2));
+    return new Response('zip');
+  };
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  switched = true;
+  assert.equal(
+    await applyPending(f.root, {
+      publicKey: keys.publicKey,
+      now,
+      request,
+      smoke: () => {},
+      extract: () => f.next.dir,
+    }),
+    true,
+  );
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(readUpdateState(f.root).available, null);
+});

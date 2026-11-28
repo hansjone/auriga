@@ -235,6 +235,9 @@ export function dshBin(dir) {
   return join(pkgDir, bin);
 }
 
+export const isScopedCore = (dir) =>
+  existsSync(join(dir, 'manifest.json')) &&
+  readJson(join(dir, 'manifest.json')).plugin?.scope === 'installation';
 const scopedCore = (dir) =>
   readJson(join(dir, 'manifest.json')).plugin.scope === 'installation';
 
@@ -942,8 +945,18 @@ function finish(root) {
   try {
     const state = readState(root);
     const keep = new Set([state.current, state.previous].filter(Boolean));
+    const preparedFile = join(root, 'desktop-pending', 'prepared.json');
+    if (existsSync(preparedFile)) {
+      try {
+        const prepared = readJson(preparedFile);
+        if (typeof prepared?.packageId === 'string')
+          keep.add(prepared.packageId);
+      } catch {
+        /* ignore malformed prepared marker */
+      }
+    }
     for (const entry of readdirSync(join(root, 'versions')))
-      if (!keep.has(entry))
+      if (!keep.has(entry) && !entry.endsWith('.staging'))
         rmSync(join(root, 'versions', entry), { recursive: true, force: true });
   } catch {
     // Pruning is best effort and happens after the change is final.
@@ -1147,6 +1160,53 @@ function movePayloadToStaging(payload, staging, step) {
     step(done / Math.max(1, topEntries.length));
   }
   return 'partial';
+}
+
+/**
+ * Pre-stage a verified extracted payload into `versions/<id>` while the current
+ * version keeps running. Caller must hold the transfer lock.
+ */
+export function stageVersionDir({
+  root,
+  payload,
+  id,
+  preverifiedManifest = null,
+}) {
+  root = resolve(root);
+  assertOwned(root);
+  mkdirSync(join(root, 'versions'), { recursive: true });
+  const target = versionDir(root, id);
+  if (existsSync(target)) {
+    try {
+      verifyPackage(target);
+      protectPythonDirectory(target);
+      return target;
+    } catch {
+      rmSync(target, { recursive: true, force: true });
+    }
+  }
+  const staging = `${target}.staging`;
+  rmSync(staging, { recursive: true, force: true });
+  let moved = false;
+  try {
+    moved = movePayloadToStaging(payload, staging, () => {});
+    if (!moved) {
+      if (existsSync(join(payload, 'runtime/python')))
+        createPythonDirectory(staging);
+      copyTreeSteps(payload, staging, () => {});
+    }
+    if (!preverifiedManifest || !moved) {
+      verifyPackage(staging);
+    } else if (moved === 'partial') {
+      verifyPackage(staging, { trees: false });
+    }
+    protectPythonDirectory(staging);
+    renameWithRetry(staging, target);
+    return target;
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /** Remove only the empty directories and marker a failed first install created. */
@@ -1396,6 +1456,8 @@ function installStopped({
   movePayload = false,
   recoverPlugins = false,
   preverifiedManifest = null,
+  prestaged = false,
+  skipPreverifiedSmoke = false,
 }) {
   const checkpoint = () => {
     if (cancelled()) throw new CancelledError();
@@ -1501,11 +1563,17 @@ function installStopped({
     const target = versionDir(root, id);
     let fresh = !existsSync(target);
     if (!fresh) {
-      try {
-        verifyPackage(target);
-      } catch {
-        rmSync(target, { recursive: true, force: true });
-        fresh = true;
+      if (!(
+        prestaged &&
+        preverifiedManifest &&
+        preverifiedManifest.id === id
+      )) {
+        try {
+          verifyPackage(target);
+        } catch {
+          rmSync(target, { recursive: true, force: true });
+          fresh = true;
+        }
       }
     }
     if (fresh) {
@@ -1554,7 +1622,8 @@ function installStopped({
     }
     if (!fresh) {
       assertGuardianCompatible(target, dataHome);
-      protectPythonDirectory(target);
+      if (!(prestaged && preverifiedManifest && preverifiedManifest.id === id))
+        protectPythonDirectory(target);
     }
     transition({
       root,
@@ -1580,9 +1649,11 @@ function installStopped({
         seedProfile(dataHome, { platformOrigin, target, isolated });
         if (!isolated) syncPlugin(target, dataHome);
         checkpoint();
-        progress('smoke', 0);
-        smoke(target, dataHome);
-        checkpoint();
+        if (!(skipPreverifiedSmoke && smoke === defaultSmoke && isolated)) {
+          progress('smoke', 0);
+          smoke(target, dataHome);
+          checkpoint();
+        }
         beginCommit();
         progress('commit', 0);
       },
@@ -1705,7 +1776,7 @@ function uninstallStopped(root, purgeData) {
   const entries = [
     ...OWNED_ENTRIES,
     ...readdirSync(root).filter((entry) =>
-      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-update\.json\.[a-f0-9-]{36}\.tmp)$/.test(
+      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-pending\.replaced\.[a-f0-9-]+|desktop-update\.json\.[a-f0-9-]{36}\.tmp)$/.test(
         entry,
       ),
     ),

@@ -7,6 +7,7 @@ import { BRAND_NAME } from './brand.mjs';
 /** Anonymous transport is bound to the configured platform origin. */
 import {
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -20,14 +21,23 @@ import {
   statSync,
   appendFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { randomUUID, createHash } from 'node:crypto';
 import { verifyRelease, releaseDigest } from './release.mjs';
 import { verifyPackageAsync, sha256File } from './verify.mjs';
-import { install, openVersionSession, readState, versionDir } from './core.mjs';
+import {
+  defaultSmoke,
+  install,
+  isScopedCore,
+  openVersionSession,
+  readState,
+  stageVersionDir,
+  versionDir,
+} from './core.mjs';
 import {
   changeUpdateState,
   cleanupDownloads,
@@ -76,6 +86,52 @@ function logUpdate(root, entry) {
   }
 }
 
+function readPendingInfo(root) {
+  const queued = join(root, 'desktop-pending');
+  if (!existsSync(queued)) return null;
+  let release = null;
+  let prepared = null;
+  try {
+    release = JSON.parse(readFileSync(join(queued, 'release.json'), 'utf8'));
+  } catch {
+    /* ignore malformed or missing release.json */
+  }
+  try {
+    const file = join(queued, 'prepared.json');
+    if (existsSync(file)) prepared = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    /* ignore malformed prepared.json */
+  }
+  return { release, prepared };
+}
+
+function cleanupPreparedVersion(root, packageId) {
+  if (
+    !packageId ||
+    typeof packageId !== 'string' ||
+    !/^[A-Za-z0-9.+-]{1,200}$/.test(packageId)
+  )
+    return;
+  try {
+    const state = readState(root);
+    if (!state || state.current === packageId || state.previous === packageId)
+      return;
+    const versionsRoot = resolve(root, 'versions');
+    const dir = resolve(versionDir(root, packageId));
+    if (!dir.startsWith(versionsRoot + sep)) return;
+    if (existsSync(dir)) {
+      rmSync(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
+    }
+  } catch {
+    /* best-effort cleanup of superseded/unactivated version */
+  }
+}
+
 // Caller owns the transfer lock. Missing durable input cannot recover by retry.
 function discardIncompletePending(root) {
   const queued = join(root, 'desktop-pending');
@@ -93,12 +149,14 @@ function discardIncompletePending(root) {
     if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
     if (!existsSync(join(root, '.auriga-desktop-install')) || !readState(root))
       throw new Error('desktop installation missing');
+    const oldPreparedId = readPendingInfo(root)?.prepared?.packageId;
     rmSync(queued, {
       recursive: true,
       force: true,
       maxRetries: 3,
       retryDelay: 200,
     });
+    cleanupPreparedVersion(root, oldPreparedId);
     const failure = {
       stage: 'verify-input',
       code: 'desktop.pending_incomplete',
@@ -292,6 +350,8 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
 }
 
 /** Publish the verified resume directory as desktop-pending.
+ * When superseding an already queued update, swap atomically via a backup path
+ * so a transient failure never leaves the user without the previous pending update.
  * Windows AV/EDR often holds the freshly written package briefly; retry and keep
  * the resume tree if the atomic rename still cannot complete. */
 async function publishPendingQueue(
@@ -303,19 +363,48 @@ async function publishPendingQueue(
     onRetry = () => {},
   } = {},
 ) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      rename(temporary, queued);
-      return;
-    } catch (error) {
-      if (
-        !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) ||
-        attempt >= delays.length
-      )
-        throw error;
-      onRetry(error, attempt + 1);
-      await delay(delays[attempt]);
+  const renameRetry = async (from, to) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        rename(from, to);
+        return;
+      } catch (error) {
+        if (
+          !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) ||
+          attempt >= delays.length
+        )
+          throw error;
+        onRetry(error, attempt + 1);
+        await delay(delays[attempt]);
+      }
     }
+  };
+  if (!existsSync(queued)) {
+    await renameRetry(temporary, queued);
+    return;
+  }
+  const backup = `${queued}.replaced.${randomUUID().slice(0, 8)}`;
+  await renameRetry(queued, backup);
+  try {
+    await renameRetry(temporary, queued);
+  } catch (error) {
+    try {
+      if (!existsSync(queued) && existsSync(backup))
+        await renameRetry(backup, queued);
+    } catch {
+      /* best-effort restore of previous queued update */
+    }
+    throw error;
+  }
+  try {
+    rmSync(backup, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 200,
+    });
+  } catch {
+    /* best-effort cleanup of replaced backup */
   }
 }
 
@@ -393,8 +482,10 @@ export function createUpdater({
     } catch {
       available = null;
     }
+    const pendingInfo = readPendingInfo(root);
     return {
       enabled: state.enabled !== false,
+      autoDownload: state.autoDownload !== false,
       channel: state.channel ?? 'stable',
       available,
       required: !!body && compare(current().version, body.minimumVersion) < 0,
@@ -409,6 +500,11 @@ export function createUpdater({
       manualRetryRequired: state.applyRetry?.manualRequired === true,
       applyFailures: state.applyRetry?.failures ?? 0,
       restartRequired: existsSync(join(root, 'desktop-pending')),
+      pendingVersion:
+        typeof pendingInfo?.release?.version === 'string'
+          ? pendingInfo.release.version
+          : null,
+      prepared: Boolean(pendingInfo?.prepared?.packageId),
     };
   };
   const api = {
@@ -423,6 +519,12 @@ export function createUpdater({
           throw new Error('mandatory update required');
         return { ...state, enabled };
       });
+      return api.status();
+    },
+    setAutoDownload(autoDownload) {
+      if (typeof autoDownload !== 'boolean')
+        throw new Error('invalid update preference');
+      change((state) => ({ ...state, autoDownload }));
       return api.status();
     },
     setChannel(channel) {
@@ -466,8 +568,6 @@ export function createUpdater({
         } finally {
           repairUnlock();
         }
-        if (api.status().restartRequired && !load().applyRetry?.manualRequired)
-          return api.status();
         const observed = load();
         const channel = observed.channel ?? 'stable';
         const response = await request(
@@ -492,32 +592,69 @@ export function createUpdater({
           change((state) => {
             if ((state.channel ?? 'stable') !== channel) return;
             const queued = join(root, 'desktop-pending');
+            let pendingDigest = null;
             if (existsSync(queued)) {
-              if (!state.applyRetry?.manualRequired) return;
-              if (
-                observed.checkId !== state.checkId ||
-                observed.applyRetry?.digest !== state.applyRetry.digest
-              )
-                return;
-              if (!missing) {
-                const active = verified(envelope, state);
-                if (releaseDigest(active) === state.applyRetry.digest)
-                  return { ...state, lastCheckedAt: now() };
+              const pendingInfo = readPendingInfo(root);
+              const oldPreparedId = pendingInfo?.prepared?.packageId;
+              if (state.applyRetry?.manualRequired) {
+                if (
+                  observed.checkId !== state.checkId ||
+                  observed.applyRetry?.digest !== state.applyRetry.digest
+                )
+                  return;
+                if (!missing) {
+                  const active = verified(envelope, state);
+                  if (releaseDigest(active) === state.applyRetry.digest)
+                    return { ...state, lastCheckedAt: now() };
+                }
+                // A signed replacement or withdrawal retires the paused input.
+                rmSync(queued, {
+                  recursive: true,
+                  force: true,
+                  maxRetries: 3,
+                  retryDelay: 200,
+                });
+                cleanupPreparedVersion(root, oldPreparedId);
+                state = {
+                  ...state,
+                  applyRetry: null,
+                  failure: null,
+                  error: null,
+                  phase: 'idle',
+                };
+              } else {
+                if (missing) {
+                  if (observed.checkId !== state.checkId) return;
+                  // Server withdrew the release while user had not restarted yet.
+                  rmSync(queued, {
+                    recursive: true,
+                    force: true,
+                    maxRetries: 3,
+                    retryDelay: 200,
+                  });
+                  cleanupPreparedVersion(root, oldPreparedId);
+                  return {
+                    ...state,
+                    available: null,
+                    requiredRelease: null,
+                    applyRetry: null,
+                    failure: null,
+                    error: null,
+                    phase: 'idle',
+                    checkId: randomUUID(),
+                    lastCheckedAt: now(),
+                  };
+                }
+                if (pendingInfo?.release) {
+                  try {
+                    const pendingBody = { ...pendingInfo.release };
+                    delete pendingBody.signature;
+                    pendingDigest = releaseDigest(pendingBody);
+                  } catch {
+                    pendingDigest = null;
+                  }
+                }
               }
-              // A signed replacement or withdrawal retires the paused input.
-              rmSync(queued, {
-                recursive: true,
-                force: true,
-                maxRetries: 3,
-                retryDelay: 200,
-              });
-              state = {
-                ...state,
-                applyRetry: null,
-                failure: null,
-                error: null,
-                phase: 'idle',
-              };
             }
             if (missing) {
               if (observed.checkId !== state.checkId) return;
@@ -527,6 +664,18 @@ export function createUpdater({
             const version = current().version;
             const installed = compare(body.version, version) === 0;
             const required = compare(version, body.minimumVersion) < 0;
+            const alreadyQueued =
+              pendingDigest !== null && releaseDigest(body) === pendingDigest;
+            if (installed && existsSync(queued)) {
+              const oldPreparedId = readPendingInfo(root)?.prepared?.packageId;
+              rmSync(queued, {
+                recursive: true,
+                force: true,
+                maxRetries: 3,
+                retryDelay: 200,
+              });
+              cleanupPreparedVersion(root, oldPreparedId);
+            }
             const bucket =
               createHash('sha256')
                 .update(state.clientId + ':' + body.sequence)
@@ -535,11 +684,14 @@ export function createUpdater({
             const eligible =
               required || bucket < (body.rolloutPercentage ?? 100);
             const available =
-              eligible && !installed && (state.enabled !== false || required)
+              eligible &&
+              !installed &&
+              !alreadyQueued &&
+              (state.enabled !== false || required)
                 ? envelope
                 : null;
             const channelWatermarks = { ...state.channelWatermarks };
-            if (available || installed) {
+            if (available || installed || alreadyQueued) {
               channelWatermarks[channel] = {
                 highestSequence: body.sequence,
                 highestPublishedAt: body.publishedAt,
@@ -565,12 +717,13 @@ export function createUpdater({
         busy = false;
       }
     },
-    async update() {
+    async update({ background = false } = {}) {
       if (busy) throw new Error('no update ready');
       busy = true;
       let unlock,
         temporary,
-        retain = false;
+        retain = false,
+        prestagedTargetId = null;
       let installStage = 'download',
         previousId;
       controller = new AbortController();
@@ -578,10 +731,25 @@ export function createUpdater({
         unlock = downloadLock(root);
         discardIncompletePending(root);
         const pending = load().available;
-        if (!pending || existsSync(join(root, 'desktop-pending')))
-          throw new Error('no update ready');
+        if (!pending) throw new Error('no update ready');
         const body = verified(pending),
           state = current();
+        const queued = join(root, 'desktop-pending');
+        let oldPreparedId = null;
+        if (existsSync(queued)) {
+          const existingPending = readPendingInfo(root);
+          oldPreparedId = existingPending?.prepared?.packageId ?? null;
+          if (existingPending?.release) {
+            try {
+              const existingBody = { ...existingPending.release };
+              delete existingBody.signature;
+              if (releaseDigest(existingBody) === releaseDigest(body))
+                throw new Error('no update ready');
+            } catch (error) {
+              if (error.message === 'no update ready') throw error;
+            }
+          }
+        }
         previousId = state.current;
         rememberUpdateAttempt(root, body.version, body.channel, true);
         temporary = resume;
@@ -654,18 +822,98 @@ export function createUpdater({
         if (actualSha !== body.sha256) throw new Error('package SHA mismatch');
         let payload;
         let manifest;
-        // For deferred real-archive updates, validate manifest.json directly
-        // from the embedded ZIP without unpacking tens of thousands of files
-        // twice (applyPending unpacks once directly into the target volume).
-        if (defer && extract === extractArchive && isZipSetupArchive(archive)) {
+        let preparedMeta = null;
+        const canPrestage =
+          defer &&
+          extract === extractArchive &&
+          (isZipSetupArchive(archive) || isGzipDesktopPackage(archive));
+        if (canPrestage) {
+          // Pre-extract, verify, protect runtime/python and pre-smoke into
+          // versions/<packageId> while the current version stays running so
+          // restart only needs a fast pointer switch.
+          const oldDir = versionDir(root, state.current);
+          let reuse = null;
+          if (isZipSetupArchive(archive)) {
+            try {
+              const nextManifest = readSetupManifest(archive);
+              const candidateDirs = [
+                oldDir,
+                ...(oldPreparedId && oldPreparedId !== state.current
+                  ? [versionDir(root, oldPreparedId)]
+                  : []),
+              ].filter((d) => existsSync(join(d, 'manifest.json')));
+              for (const srcDir of candidateDirs) {
+                const srcManifest = JSON.parse(
+                  readFileSync(join(srcDir, 'manifest.json'), 'utf8'),
+                );
+                const subtrees = findReusableSubtrees(
+                  srcDir,
+                  srcManifest,
+                  nextManifest,
+                );
+                if (subtrees.length) {
+                  reuse = { sourceDir: srcDir, subtrees };
+                  break;
+                }
+              }
+            } catch {
+              /* fall back to full extraction */
+            }
+          }
+          progress('verifying', { stage: 'extract' });
+          installStage = 'extract';
+          const unpackedDir = join(temporary, 'unpacked');
+          payload = await extract(archive, unpackedDir, { reuse });
           progress('verifying', { stage: 'verify-package' });
           installStage = 'verify-package';
-          manifest = readSetupManifest(archive);
+          const verifyConcurrency = background ? 4 : 12;
+          try {
+            manifest = await verifyPackageAsync(payload, {
+              concurrency: verifyConcurrency,
+            });
+          } catch (error) {
+            if (!reuse) throw error;
+            // Old reusable subtree may have been damaged on disk; retry full extract.
+            rmSync(unpackedDir, { recursive: true, force: true });
+            payload = await extract(archive, unpackedDir, { reuse: null });
+            manifest = await verifyPackageAsync(payload, {
+              concurrency: verifyConcurrency,
+            });
+          }
           if (
             manifest.id !== body.packageId ||
             manifest.bundleVersion !== body.version
           )
             throw new Error('package ID/version mismatch');
+          progress('verifying', { stage: 'prepare' });
+          installStage = 'prepare';
+          const stagedTarget = stageVersionDir({
+            root,
+            payload,
+            id: body.packageId,
+            preverifiedManifest: manifest,
+          });
+          prestagedTargetId = body.packageId;
+          rmSync(unpackedDir, { recursive: true, force: true });
+          let smokeVerified = false;
+          if (isScopedCore(stagedTarget)) {
+            const smokeHome = mkdtempSync(
+              join(tmpdir(), 'auriga-prestage-smoke-'),
+            );
+            try {
+              (smoke ?? defaultSmoke)(stagedTarget, smokeHome);
+              smokeVerified = true;
+            } finally {
+              rmSync(smokeHome, { recursive: true, force: true });
+            }
+          }
+          preparedMeta = {
+            packageId: body.packageId,
+            version: body.version,
+            releaseDigest: releaseDigest(body),
+            preparedAt: now(),
+            smokeVerified,
+          };
         } else {
           progress('verifying', { stage: 'extract' });
           installStage = 'extract';
@@ -703,13 +951,18 @@ export function createUpdater({
         }
         retain = false;
         if (defer) {
-          const queued = join(root, 'desktop-pending');
-          if (existsSync(queued)) throw new Error('update already queued');
           writeFileSync(
             join(temporary, 'release.json'),
             JSON.stringify(pending),
             { mode: 0o600 },
           );
+          if (preparedMeta) {
+            writeFileSync(
+              join(temporary, 'prepared.json'),
+              JSON.stringify(preparedMeta),
+              { mode: 0o600 },
+            );
+          }
           if (requireApproval)
             writeFileSync(join(temporary, 'approval-required'), '', {
               mode: 0o600,
@@ -729,8 +982,16 @@ export function createUpdater({
           });
           temporary = undefined;
           retain = false;
+          prestagedTargetId = null;
+          if (oldPreparedId && oldPreparedId !== body.packageId)
+            cleanupPreparedVersion(root, oldPreparedId);
           progress('ready', { available: null, applyRetry: null });
-          return { restartRequired: true, queued: true };
+          return {
+            restartRequired: true,
+            queued: true,
+            prepared: Boolean(preparedMeta),
+            version: body.version,
+          };
         }
         progress('installing');
         installStage = 'installation';
@@ -751,6 +1012,7 @@ export function createUpdater({
           message: `更新完成。请关闭并重新打开 ${BRAND_NAME}。`,
         };
       } catch (error) {
+        if (prestagedTargetId) cleanupPreparedVersion(root, prestagedTargetId);
         if (previousId)
           finishUpdateAttempt(
             root,
@@ -942,6 +1204,8 @@ async function applyPendingLocked(
   let stage = 'verify-current';
   let identity;
   let previousId;
+  let preparedPackageId = null;
+  let supersedingRelease = null;
   const note = (next) => {
     if (stage === next) return;
     stage = next;
@@ -1063,21 +1327,37 @@ async function applyPendingLocked(
     if (!response.ok) throw new Error('queued release check unavailable');
     const activeText = (await bounded(response, 32768)).toString('utf8');
     const active = rejectInvalid(() => JSON.parse(activeText));
-    const activeBody = rejectInvalid(() =>
-      verifyRelease(active, {
+    const activeBody = rejectInvalid(() => {
+      const verifiedActive = verifyRelease(active, {
         publicKey,
         now,
+        currentVersion: old.bundleVersion,
+        ...saved.channelWatermarks?.[body.channel],
         channel: body.channel,
-      }),
-    );
+      });
+      if (verifiedActive.platform !== desktopHost().target)
+        throw new Error('release platform mismatch');
+      return verifiedActive;
+    });
     if (
       releaseDigest(activeBody) !== releaseDigest(body) ||
       JSON.stringify(active.signature) !== JSON.stringify(envelope.signature)
     ) {
-      retain = false;
-      throw Object.assign(new Error('queued release replaced'), {
-        code: 'desktop.release_replaced',
-      });
+      // Allow completing an already valid, non-expired, non-rolled-back staged
+      // version when a strictly newer release was just published, then queue
+      // the newer release for background preparation after restart (respecting
+      // rollout percentage and update preference).
+      const canFinishStaged =
+        compare(activeBody.version, body.version) > 0 &&
+        activeBody.rollbackFrom !== body.version &&
+        compare(body.version, activeBody.minimumVersion) >= 0;
+      if (!canFinishStaged) {
+        retain = false;
+        throw Object.assign(new Error('queued release replaced'), {
+          code: 'desktop.release_replaced',
+        });
+      }
+      supersedingRelease = { envelope: active, body: activeBody };
     }
     if (
       saved.applyRetry?.manualRequired &&
@@ -1093,122 +1373,202 @@ async function applyPendingLocked(
       onState({ phase: 'awaiting-retry', ...saved.failure });
       return false;
     }
-    note('verify-archive');
-    const archive = stagedPackagePath(queued);
-    const checkArchive = () => {
-      if (pendingInput(() => sha256File(archive)) !== body.sha256) {
+    const useRealExtract = extract === extractArchive;
+    const prepared = readPendingInfo(root)?.prepared;
+    let fastApplied = false;
+    if (
+      useRealExtract &&
+      prepared &&
+      prepared.packageId === body.packageId &&
+      prepared.releaseDigest === identity
+    ) {
+      preparedPackageId = prepared.packageId;
+      const target = versionDir(root, body.packageId);
+      if (existsSync(target)) {
+        try {
+          note('verify-package');
+          const fastManifest = await verifyPackageAsync(target, {
+            trees: false,
+          });
+          if (
+            fastManifest.id !== body.packageId ||
+            fastManifest.bundleVersion !== body.version
+          )
+            throw new Error('prestaged package ID mismatch');
+          note('install');
+          await retry(async () =>
+            install({
+              root,
+              payload: target,
+              dataHome: current.dataHome,
+              smoke,
+              session,
+              transfer,
+              preverifiedManifest: fastManifest,
+              prestaged: true,
+              skipPreverifiedSmoke:
+                prepared.smokeVerified === true && smoke === undefined,
+              progress: (step) => note(step),
+            }),
+          );
+          fastApplied = true;
+        } catch (fastError) {
+          // If the pre-staged version was damaged while waiting for restart,
+          // remove it and fall back cleanly to the signed archive; propagate
+          // smoke/profile/I/O errors from install() directly.
+          if (stage === 'verify-package') {
+            cleanupPreparedVersion(root, body.packageId);
+          } else {
+            throw fastError;
+          }
+        }
+      }
+    }
+    if (!fastApplied) {
+      note('verify-archive');
+      const archive = stagedPackagePath(queued);
+      const checkArchive = () => {
+        if (pendingInput(() => sha256File(archive)) !== body.sha256) {
+          retain = false;
+          throw Object.assign(new Error('queued package SHA mismatch'), {
+            code: 'desktop.archive_invalid',
+          });
+        }
+      };
+      const unpacked = join(queued, 'apply');
+      let usedReuse = false;
+      let payload = await retry(async () => {
+        note('verify-archive');
+        checkArchive();
+        note('extract');
+        // The signed archive is the durable input. Rebuild scratch output after
+        // interruption or failed extraction, while holding the transfer lock.
+        rmSync(unpacked, { recursive: true, force: true });
+        usedReuse = false;
+        if (useRealExtract) {
+          let reuse = null;
+          try {
+            const nextManifest = readSetupManifest(archive);
+            const subtrees = findReusableSubtrees(oldDir, old, nextManifest);
+            if (subtrees.length) reuse = { sourceDir: oldDir, subtrees };
+          } catch {
+            /* Fall back to standard full extraction if manifest peek fails. */
+          }
+          usedReuse = Boolean(reuse);
+          return await extract(archive, unpacked, { reuse });
+        }
+        return await extract(archive, unpacked);
+      });
+      note('verify-package');
+      let manifest;
+      try {
+        manifest = await verifyPackageAsync(payload);
+      } catch (error) {
+        if (usedReuse) {
+          // An unchanged subtree in the old version may have been damaged on disk.
+          // Fall back to a clean full extraction from the verified archive before
+          // declaring the pending update package invalid.
+          note('extract');
+          rmSync(unpacked, { recursive: true, force: true });
+          payload = await retry(async () => {
+            checkArchive();
+            rmSync(unpacked, { recursive: true, force: true });
+            return await extract(archive, unpacked, { reuse: null });
+          });
+          note('verify-package');
+          try {
+            manifest = await verifyPackageAsync(payload);
+          } catch (fullError) {
+            if (!fullError.code || !/^(E[A-Z]+)$/.test(fullError.code)) {
+              retain = false;
+              fullError.code ??= 'desktop.package_invalid';
+            }
+            throw fullError;
+          }
+        } else {
+          if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
+            retain = false;
+            error.code ??= 'desktop.package_invalid';
+          }
+          throw error;
+        }
+      }
+      if (
+        manifest.id !== body.packageId ||
+        manifest.bundleVersion !== body.version
+      ) {
         retain = false;
-        throw Object.assign(new Error('queued package SHA mismatch'), {
-          code: 'desktop.archive_invalid',
+        throw Object.assign(new Error('queued package ID mismatch'), {
+          code: 'desktop.package_invalid',
         });
       }
-    };
-    const unpacked = join(queued, 'apply');
-    const useRealExtract = extract === extractArchive;
-    let usedReuse = false;
-    let payload = await retry(async () => {
-      note('verify-archive');
-      checkArchive();
-      note('extract');
-      // The signed archive is the durable input. Rebuild scratch output after
-      // interruption or failed extraction, while holding the transfer lock.
-      rmSync(unpacked, { recursive: true, force: true });
-      usedReuse = false;
-      if (useRealExtract) {
-        let reuse = null;
-        try {
-          const nextManifest = readSetupManifest(archive);
-          const subtrees = findReusableSubtrees(oldDir, old, nextManifest);
-          if (subtrees.length) reuse = { sourceDir: oldDir, subtrees };
-        } catch {
-          /* Fall back to standard full extraction if manifest peek fails. */
-        }
-        usedReuse = Boolean(reuse);
-        return await extract(archive, unpacked, { reuse });
-      }
-      return await extract(archive, unpacked);
-    });
-    note('verify-package');
-    let manifest;
-    try {
-      manifest = await verifyPackageAsync(payload);
-    } catch (error) {
-      if (usedReuse) {
-        // An unchanged subtree in the old version may have been damaged on disk.
-        // Fall back to a clean full extraction from the verified archive before
-        // declaring the pending update package invalid.
-        note('extract');
-        rmSync(unpacked, { recursive: true, force: true });
-        payload = await retry(async () => {
+      note('install');
+      let installAttempt = 0;
+      await retry(async () => {
+        const retrying = installAttempt++ > 0;
+        if (
+          useRealExtract &&
+          !existsSync(versionDir(root, manifest.id)) &&
+          (retrying || !existsSync(join(payload, 'manifest.json')))
+        ) {
           checkArchive();
           rmSync(unpacked, { recursive: true, force: true });
-          return await extract(archive, unpacked, { reuse: null });
+          payload = await extract(archive, unpacked, { reuse: null });
+          await verifyPackageAsync(payload);
+        }
+        return install({
+          root,
+          payload,
+          dataHome: current.dataHome,
+          smoke,
+          session,
+          transfer,
+          movePayload: useRealExtract,
+          preverifiedManifest: useRealExtract ? manifest : null,
+          progress: (step) => note(step),
         });
-        note('verify-package');
-        try {
-          manifest = await verifyPackageAsync(payload);
-        } catch (fullError) {
-          if (!fullError.code || !/^(E[A-Z]+)$/.test(fullError.code)) {
-            retain = false;
-            fullError.code ??= 'desktop.package_invalid';
-          }
-          throw fullError;
-        }
-      } else {
-        if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
-          retain = false;
-          error.code ??= 'desktop.package_invalid';
-        }
-        throw error;
-      }
-    }
-    if (
-      manifest.id !== body.packageId ||
-      manifest.bundleVersion !== body.version
-    ) {
-      retain = false;
-      throw Object.assign(new Error('queued package ID mismatch'), {
-        code: 'desktop.package_invalid',
       });
     }
-    note('install');
-    let installAttempt = 0;
-    await retry(async () => {
-      const retrying = installAttempt++ > 0;
-      if (
-        useRealExtract &&
-        !existsSync(versionDir(root, manifest.id)) &&
-        (retrying || !existsSync(join(payload, 'manifest.json')))
-      ) {
-        checkArchive();
-        rmSync(unpacked, { recursive: true, force: true });
-        payload = await extract(archive, unpacked, { reuse: null });
-        await verifyPackageAsync(payload);
-      }
-      return install({
-        root,
-        payload,
-        dataHome: current.dataHome,
-        smoke,
-        session,
-        transfer,
-        movePayload: useRealExtract,
-        preverifiedManifest: useRealExtract ? manifest : null,
-        progress: (step) => note(step),
-      });
-    });
     retain = false;
     finishUpdateAttempt(root, 'succeeded');
-    changeUpdateState(root, (state) => ({
-      ...state,
-      phase: 'idle',
-      error: null,
-      available: null,
-      requiredRelease: null,
-      failure: null,
-      stage: 'done',
-      applyRetry: null,
-    }));
+    changeUpdateState(root, (state) => {
+      let nextAvailable = null;
+      let nextRequired = null;
+      const channelWatermarks = { ...state.channelWatermarks };
+      if (supersedingRelease) {
+        const nextBody = supersedingRelease.body;
+        const required = compare(body.version, nextBody.minimumVersion) < 0;
+        const bucket =
+          createHash('sha256')
+            .update((state.clientId ?? '') + ':' + nextBody.sequence)
+            .digest()
+            .readUInt32BE(0) % 100;
+        const eligible =
+          required || bucket < (nextBody.rolloutPercentage ?? 100);
+        if (eligible && (state.enabled !== false || required)) {
+          nextAvailable = supersedingRelease.envelope;
+          if (required) nextRequired = supersedingRelease.envelope;
+          channelWatermarks[nextBody.channel] = {
+            highestSequence: nextBody.sequence,
+            highestPublishedAt: nextBody.publishedAt,
+            highestVersion: nextBody.version,
+            acceptedDigest: nextBody.sha256,
+            acceptedEnvelope: releaseDigest(nextBody),
+          };
+        }
+      }
+      return {
+        ...state,
+        channelWatermarks,
+        phase: 'idle',
+        error: null,
+        available: nextAvailable,
+        requiredRelease: nextRequired,
+        failure: null,
+        stage: 'done',
+        applyRetry: null,
+      };
+    });
     return true;
   } catch (error) {
     finishUpdateAttempt(
@@ -1259,6 +1619,8 @@ async function applyPendingLocked(
     throw error;
   } finally {
     if (!retain) {
+      const discardedId =
+        preparedPackageId ?? readPendingInfo(root)?.prepared?.packageId;
       try {
         rmSync(queued, {
           recursive: true,
@@ -1281,6 +1643,7 @@ async function applyPendingLocked(
         logUpdate(root, cleanup);
         onState(cleanup);
       }
+      cleanupPreparedVersion(root, discardedId);
     }
   }
 }

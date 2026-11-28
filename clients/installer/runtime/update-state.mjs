@@ -49,10 +49,11 @@ export function readUpdateState(root) {
     }
     for (const field of fields) delete state[field];
     state.channelWatermarks ??= {};
+    if (typeof state.autoDownload !== 'boolean') state.autoDownload = true;
     return state;
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    return { enabled: true, channelWatermarks: {} };
+    return { enabled: true, autoDownload: true, channelWatermarks: {} };
   }
 }
 
@@ -122,8 +123,18 @@ function cleanupLegacyDownloads(root, stopped = false) {
   }
   rmSync(file, { force: true });
   for (const name of readdirSync(root))
-    if (/^\.desktop-download-[A-Za-z0-9-]+$/.test(name))
+    if (
+      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-pending\.replaced\.[a-f0-9-]+)$/.test(
+        name,
+      )
+    )
       rmSync(join(root, name), { recursive: true, force: true });
+  const versionsDir = join(root, 'versions');
+  if (existsSync(versionsDir)) {
+    for (const name of readdirSync(versionsDir))
+      if (name.endsWith('.staging'))
+        rmSync(join(versionsDir, name), { recursive: true, force: true });
+  }
   return true;
 }
 
