@@ -290,7 +290,7 @@ sealed class TrayApp : ApplicationContext
     readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer pendingTimer = new System.Windows.Forms.Timer();
     Process launcher;
-    string dshUrl, platformState, platformReason, availableVersion, pendingVersion, logFile, updateStageText;
+    string dshUrl, platformState, platformReason, availableVersion, pendingVersion, lastBalloonKind, logFile, updateStageText;
     readonly object updateLock = new object();
     readonly object logLock = new object();
     Process updateWorker;
@@ -333,7 +333,12 @@ sealed class TrayApp : ApplicationContext
         icon.ContextMenuStrip = menu;
         menu.Opening += delegate { SyncCurrentVersionIfChanged(); UpdateMenu(); };
         icon.MouseDoubleClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenAuriga(); };
-        icon.BalloonTipClicked += delegate { if (restartRequired) RestartForUpdate(); else if (availableVersion != null) DownloadUpdate(); };
+        icon.BalloonTipClicked += delegate
+        {
+            if (lastBalloonKind == "available" && availableVersion != null) DownloadUpdate();
+            else if (restartRequired) RestartForUpdate();
+            else if (availableVersion != null) DownloadUpdate();
+        };
         icon.Visible = true;
         checkTimer.Tick += delegate { checkTimer.Interval = 6 * 3600 * 1000; CheckUpdate(false); };
         // An update downloaded from the DSH settings page also waits for a restart: offer it here.
@@ -349,6 +354,7 @@ sealed class TrayApp : ApplicationContext
                 restartRequired = true;
                 pendingVersion = nextPendingVersion;
                 string ver = string.IsNullOrEmpty(pendingVersion) ? "" : (" " + pendingVersion);
+                lastBalloonKind = "restart";
                 icon.ShowBalloonTip(10000, Desktop.Brand, "新版本" + ver + " 已准备就绪。点击此处重启 Auriga 完成更新。", ToolTipIcon.Info);
             }
             else if (queued && !busy && !updateApplying)
@@ -580,19 +586,13 @@ sealed class TrayApp : ApplicationContext
                 return (bool)raw;
             return true;
         }
-        set
-        {
-            string error;
-            Desktop.RunJson(root, "update configure --root " + Desktop.Quote(root) + " --auto-download " + (value ? "true" : "false"), out error);
-            try
-            {
-                string file = Path.Combine(root, "desktop-tray.json");
-                File.WriteAllText(file + ".tmp", Desktop.Json.Serialize(new Dictionary<string, object> { { "autoDownload", value } }), new UTF8Encoding(false));
-                if (File.Exists(file)) File.Delete(file);
-                File.Move(file + ".tmp", file);
-            }
-            catch (Exception) { }
-        }
+    }
+
+    bool ReadUpdateEnabled()
+    {
+        var update = Desktop.ReadJson(Path.Combine(root, "desktop-update.json"));
+        object raw;
+        return update == null || !update.TryGetValue("enabled", out raw) || !(raw is bool) || (bool)raw;
     }
 
     void UpdateMenu()
@@ -604,12 +604,15 @@ sealed class TrayApp : ApplicationContext
             : running ? "运行中 · 版本 " + (Desktop.Str(info, "version") ?? "?")
             : "未运行（点“打开 Auriga”启动）";
         platformItem.Text = running ? Desktop.PlatformText(platformState, platformReason) : "平台：未运行";
-        updateItem.Visible = availableVersion != null && !restartRequired && !updateApplying;
+        updateItem.Visible = availableVersion != null && !updateApplying;
         updateItem.Text = "立即更新到 " + availableVersion;
         updateItem.Enabled = !busy && !updateApplying && !exiting;
         restartItem.Visible = (restartRequired || updateApplying || restarting) && !exiting;
         if (updateApplying || restarting) restartItem.Text = "正在安装更新…（查看进度）";
         else if (!restartItem.Text.StartsWith("重试更新")) restartItem.Text = RestartMenuLabel();
+        updateEnabled = ReadUpdateEnabled();
+        autoCheckItem.Checked = updateEnabled;
+        autoDownloadItem.Checked = AutoDownload;
         fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated" && !exiting;
         checkItem.Enabled = !busy && !updateApplying && !exiting && Desktop.Flag(info, "updatesConfigured");
         pythonResetItem.Enabled = !busy && !restarting && !updateApplying && !exiting;
@@ -972,6 +975,7 @@ sealed class TrayApp : ApplicationContext
                         }
                         else
                         {
+                            lastBalloonKind = "available";
                             icon.ShowBalloonTip(8000, Desktop.Brand, (required ? "必须更新：" : "发现新版本 ") + availableVersion + "。点击此处或托盘菜单“立即更新”。", required ? ToolTipIcon.Warning : ToolTipIcon.Info);
                         }
                     }
@@ -996,9 +1000,13 @@ sealed class TrayApp : ApplicationContext
         if (busy) return;
         bool wasRestartRequired = restartRequired;
         busy = true; UpdateMenu();
-        var form = new ProgressForm("正在下载更新 " + availableVersion, "正在下载更新包…", true);
-        form.Cancelled += delegate { StopUpdateWorker(); };
-        if (!background) form.Show();
+        ProgressForm form = null;
+        if (!background)
+        {
+            form = new ProgressForm("正在下载更新 " + availableVersion, "正在下载更新包…", true);
+            form.Cancelled += delegate { StopUpdateWorker(); };
+            form.Show();
+        }
         string arguments = "update download --root " + Desktop.Quote(root) + (background ? " --background --auto-apply" : "");
         ThreadPool.QueueUserWorkItem(delegate
         {
@@ -1006,7 +1014,7 @@ sealed class TrayApp : ApplicationContext
             string error = null;
             try
             {
-                if (form.WasCancelled) throw new OperationCanceledException();
+                if (form != null && form.WasCancelled) throw new OperationCanceledException();
                 using (var child = StartUpdateWorker(Desktop.NodeStart(root, arguments)))
                 {
                     if (background)
@@ -1020,20 +1028,24 @@ sealed class TrayApp : ApplicationContext
                         Dictionary<string, object> value;
                         try { value = Desktop.Json.Deserialize<Dictionary<string, object>>(line); } catch (Exception) { continue; }
                         last = value;
-                        long done = Convert.ToInt64(value.ContainsKey("downloadedBytes") ? value["downloadedBytes"] : 0);
-                        long total = Convert.ToInt64(value.ContainsKey("totalBytes") ? value["totalBytes"] : 0);
-                        string phase = Desktop.Str(value, "phase");
-                        string stage = Desktop.Str(value, "stage");
-                        Post(delegate
+                        if (form != null)
                         {
-                            string detail = UpdateDownloadMessage(phase, stage);
-                            if (detail != null)
-                                form.Report(detail, -1);
-                            else
-                                form.Report(
-                                    string.Format("已下载 {0:0.0} / {1:0.0} MB", done / 1048576.0, total / 1048576.0),
-                                    total > 0 ? (int)(done * 100 / total) : -1);
-                        });
+                            long done = Convert.ToInt64(value.ContainsKey("downloadedBytes") ? value["downloadedBytes"] : 0);
+                            long total = Convert.ToInt64(value.ContainsKey("totalBytes") ? value["totalBytes"] : 0);
+                            string phase = Desktop.Str(value, "phase");
+                            string stage = Desktop.Str(value, "stage");
+                            Post(delegate
+                            {
+                                if (form.IsDisposed) return;
+                                string detail = UpdateDownloadMessage(phase, stage);
+                                if (detail != null)
+                                    form.Report(detail, -1);
+                                else
+                                    form.Report(
+                                        string.Format("已下载 {0:0.0} / {1:0.0} MB", done / 1048576.0, total / 1048576.0),
+                                        total > 0 ? (int)(done * 100 / total) : -1);
+                            });
+                        }
                     }
                     child.WaitForExit();
                     if (child.ExitCode != 0) last = null;
@@ -1043,8 +1055,12 @@ sealed class TrayApp : ApplicationContext
             Post(delegate
             {
                 busy = false;
-                bool cancelled = form.WasCancelled;
-                form.Close();
+                bool cancelled = form != null && form.WasCancelled;
+                if (form != null)
+                {
+                    if (!form.IsDisposed) form.Close();
+                    form.Dispose();
+                }
                 if (exiting) return;
                 if (last != null && Desktop.Flag(last, "queued"))
                 {
@@ -1057,7 +1073,10 @@ sealed class TrayApp : ApplicationContext
                     {
                         // Avoid repeated notification spam when silently superseding an earlier pending version.
                         if (!wasRestartRequired)
+                        {
+                            lastBalloonKind = "restart";
                             icon.ShowBalloonTip(10000, Desktop.Brand, "新版本" + ver + " 已准备就绪。点击此处重启 Auriga 完成更新。", ToolTipIcon.Info);
+                        }
                     }
                     else if (MessageBox.Show("新版本" + ver + " 已下载并准备就绪。现在重启 Auriga 完成更新吗？\n重启只需数秒，会话与数据会保留。", Desktop.Brand, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                         RestartForUpdate();
@@ -1270,7 +1289,24 @@ sealed class TrayApp : ApplicationContext
 
     void ToggleAutoDownload()
     {
-        try { AutoDownload = !autoDownloadItem.Checked; autoDownloadItem.Checked = !autoDownloadItem.Checked; }
+        bool enable = !autoDownloadItem.Checked;
+        string error;
+        var result = Desktop.RunJson(root, "update configure --root " + Desktop.Quote(root) + " --auto-download " + (enable ? "true" : "false"), out error);
+        if (result == null)
+        {
+            Log("autoDownload configure failed: " + error);
+            MessageBox.Show("修改自动下载设置失败，请稍后重试。", Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        bool saved = Desktop.Flag(result, "autoDownload");
+        autoDownloadItem.Checked = saved;
+        try
+        {
+            string file = Path.Combine(root, "desktop-tray.json");
+            File.WriteAllText(file + ".tmp", Desktop.Json.Serialize(new Dictionary<string, object> { { "autoDownload", saved } }), new UTF8Encoding(false));
+            if (File.Exists(file)) File.Delete(file);
+            File.Move(file + ".tmp", file);
+        }
         catch (Exception) { }
     }
 

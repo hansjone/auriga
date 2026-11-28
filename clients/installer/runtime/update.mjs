@@ -23,7 +23,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { randomUUID, createHash } from 'node:crypto';
@@ -106,12 +106,19 @@ function readPendingInfo(root) {
 }
 
 function cleanupPreparedVersion(root, packageId) {
-  if (!packageId || typeof packageId !== 'string') return;
+  if (
+    !packageId ||
+    typeof packageId !== 'string' ||
+    !/^[A-Za-z0-9.+-]{1,200}$/.test(packageId)
+  )
+    return;
   try {
     const state = readState(root);
     if (!state || state.current === packageId || state.previous === packageId)
       return;
-    const dir = versionDir(root, packageId);
+    const versionsRoot = resolve(root, 'versions');
+    const dir = resolve(versionDir(root, packageId));
+    if (!dir.startsWith(versionsRoot + sep)) return;
     if (existsSync(dir)) {
       rmSync(dir, {
         recursive: true,
@@ -382,7 +389,8 @@ async function publishPendingQueue(
     await renameRetry(temporary, queued);
   } catch (error) {
     try {
-      if (!existsSync(queued) && existsSync(backup)) rename(backup, queued);
+      if (!existsSync(queued) && existsSync(backup))
+        await renameRetry(backup, queued);
     } catch {
       /* best-effort restore of previous queued update */
     }
@@ -1004,8 +1012,7 @@ export function createUpdater({
           message: `更新完成。请关闭并重新打开 ${BRAND_NAME}。`,
         };
       } catch (error) {
-        if (prestagedTargetId && !retain)
-          cleanupPreparedVersion(root, prestagedTargetId);
+        if (prestagedTargetId) cleanupPreparedVersion(root, prestagedTargetId);
         if (previousId)
           finishUpdateAttempt(
             root,
@@ -1320,20 +1327,26 @@ async function applyPendingLocked(
     if (!response.ok) throw new Error('queued release check unavailable');
     const activeText = (await bounded(response, 32768)).toString('utf8');
     const active = rejectInvalid(() => JSON.parse(activeText));
-    const activeBody = rejectInvalid(() =>
-      verifyRelease(active, {
+    const activeBody = rejectInvalid(() => {
+      const verifiedActive = verifyRelease(active, {
         publicKey,
         now,
+        currentVersion: old.bundleVersion,
+        ...saved.channelWatermarks?.[body.channel],
         channel: body.channel,
-      }),
-    );
+      });
+      if (verifiedActive.platform !== desktopHost().target)
+        throw new Error('release platform mismatch');
+      return verifiedActive;
+    });
     if (
       releaseDigest(activeBody) !== releaseDigest(body) ||
       JSON.stringify(active.signature) !== JSON.stringify(envelope.signature)
     ) {
       // Allow completing an already valid, non-expired, non-rolled-back staged
       // version when a strictly newer release was just published, then queue
-      // the newer release for background preparation after restart.
+      // the newer release for background preparation after restart (respecting
+      // rollout percentage and update preference).
       const canFinishStaged =
         compare(activeBody.version, body.version) > 0 &&
         activeBody.rollbackFrom !== body.version &&
@@ -1344,7 +1357,7 @@ async function applyPendingLocked(
           code: 'desktop.release_replaced',
         });
       }
-      supersedingRelease = active;
+      supersedingRelease = { envelope: active, body: activeBody };
     }
     if (
       saved.applyRetry?.manualRequired &&
@@ -1518,16 +1531,44 @@ async function applyPendingLocked(
     }
     retain = false;
     finishUpdateAttempt(root, 'succeeded');
-    changeUpdateState(root, (state) => ({
-      ...state,
-      phase: 'idle',
-      error: null,
-      available: supersedingRelease ?? null,
-      requiredRelease: null,
-      failure: null,
-      stage: 'done',
-      applyRetry: null,
-    }));
+    changeUpdateState(root, (state) => {
+      let nextAvailable = null;
+      let nextRequired = null;
+      const channelWatermarks = { ...state.channelWatermarks };
+      if (supersedingRelease) {
+        const nextBody = supersedingRelease.body;
+        const required = compare(body.version, nextBody.minimumVersion) < 0;
+        const bucket =
+          createHash('sha256')
+            .update((state.clientId ?? '') + ':' + nextBody.sequence)
+            .digest()
+            .readUInt32BE(0) % 100;
+        const eligible =
+          required || bucket < (nextBody.rolloutPercentage ?? 100);
+        if (eligible && (state.enabled !== false || required)) {
+          nextAvailable = supersedingRelease.envelope;
+          if (required) nextRequired = supersedingRelease.envelope;
+          channelWatermarks[nextBody.channel] = {
+            highestSequence: nextBody.sequence,
+            highestPublishedAt: nextBody.publishedAt,
+            highestVersion: nextBody.version,
+            acceptedDigest: nextBody.sha256,
+            acceptedEnvelope: releaseDigest(nextBody),
+          };
+        }
+      }
+      return {
+        ...state,
+        channelWatermarks,
+        phase: 'idle',
+        error: null,
+        available: nextAvailable,
+        requiredRelease: nextRequired,
+        failure: null,
+        stage: 'done',
+        applyRetry: null,
+      };
+    });
     return true;
   } catch (error) {
     finishUpdateAttempt(

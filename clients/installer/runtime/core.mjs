@@ -1178,7 +1178,8 @@ export function stageVersionDir({
   const target = versionDir(root, id);
   if (existsSync(target)) {
     try {
-      verifyPackage(target, { trees: false });
+      verifyPackage(target);
+      protectPythonDirectory(target);
       return target;
     } catch {
       rmSync(target, { recursive: true, force: true });
@@ -1775,7 +1776,7 @@ function uninstallStopped(root, purgeData) {
   const entries = [
     ...OWNED_ENTRIES,
     ...readdirSync(root).filter((entry) =>
-      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-update\.json\.[a-f0-9-]{36}\.tmp)$/.test(
+      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-pending\.replaced\.[a-f0-9-]+|desktop-update\.json\.[a-f0-9-]{36}\.tmp)$/.test(
         entry,
       ),
     ),

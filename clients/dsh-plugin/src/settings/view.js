@@ -242,7 +242,7 @@ const messages = {
     autoDownloadHint:
       'Automatically download and unpack updates so restarting is fast',
     updateRestart:
-      'The new version is prepared in the background. Restart Auriga DSH to switch quickly.',
+      'The new version is prepared in the background. Restart or close Auriga DSH to switch quickly.',
     platform: 'Platform',
     aurigaCloud: 'Auriga Cloud',
     address: 'Cloud platform address',

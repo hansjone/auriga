@@ -123,7 +123,11 @@ function cleanupLegacyDownloads(root, stopped = false) {
   }
   rmSync(file, { force: true });
   for (const name of readdirSync(root))
-    if (/^\.desktop-download-[A-Za-z0-9-]+$/.test(name))
+    if (
+      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-pending\.replaced\.[a-f0-9-]+)$/.test(
+        name,
+      )
+    )
       rmSync(join(root, name), { recursive: true, force: true });
   const versionsDir = join(root, 'versions');
   if (existsSync(versionsDir)) {
