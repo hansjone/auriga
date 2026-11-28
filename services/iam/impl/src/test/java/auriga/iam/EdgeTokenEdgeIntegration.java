@@ -141,16 +141,17 @@ final class EdgeTokenEdgeIntegration {
       assertNotEquals(first, second);
       advance(dir, 1);
       await(dir, process, 2);
+      // Advance only the token clock past the first JWT. Keep the session clock so
+      // the Go consumer's admin session idle (30m) stays valid through stage 3.
       clock.now = clock.now.plusSeconds(ttl - 240 + 1);
-      time.now = clock.now;
       assertThrows(auriga.common.error.AurigaException.class, () -> verifier.verify(first));
       advance(dir, 2);
       await(dir, process, 3);
       Files.writeString(credential, Secrets.random());
       assertFalse(publisher.refresh());
       assertEquals(second, Files.readString(token));
+      // Expire the refreshed file token for the next Go verify(unauthenticated).
       clock.now = clock.now.plusSeconds(240);
-      time.now = clock.now;
       advance(dir, 3);
       await(dir, process, 4);
       Files.writeString(credential, secret);

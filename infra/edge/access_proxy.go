@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"math"
 	"mime"
@@ -270,14 +272,20 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(403, "common.forbidden")
 		return
 	}
-	// Portal/admin browser APIs require an authoritative cookie session. A
-	// client-held Bearer with sid must not outlive revoke or idle/absolute
-	// expiry; when the cookie session is valid Edge forwards the introspected
-	// access token, not the caller's cached JWT. Device/AI Bearers use other
-	// handlers.
-	if !public && sess == nil {
+	// Cookie present but session gone (revoke/idle/absolute): reject. Device
+	// Bearers without a cookie still forward. A client-held JWT that carries
+	// sid is a browser session ticket and must not outlive the authoritative
+	// cookie session—reject it when no live session is loaded.
+	if !public && sess == nil && (!clientBearer || cookieOK || ipAdmin && isWriteMethod(r.Method)) {
 		fail(401, "common.unauthenticated")
 		return
+	}
+	if !public && sess == nil && clientBearer {
+		rawBearer := strings.TrimPrefix(auth, "Bearer ")
+		if accessTokenHasSID(rawBearer) {
+			fail(401, "common.unauthenticated")
+			return
+		}
 	}
 	if bootstrap {
 		contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -522,6 +530,22 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap, authenti
 		selected = append(selected, raw...)
 	}
 	return strings.Join(selected, "; "), nil
+}
+
+// Unverified payload peek: browser access JWTs carry sid; device tickets do not.
+func accessTokenHasSID(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || len(token) > 16384 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Session string `json:"sid"`
+	}
+	return json.Unmarshal(raw, &claims) == nil && claims.Session != ""
 }
 
 // Preserve private enterprise values byte-for-byte. net/http Cookie parsing and

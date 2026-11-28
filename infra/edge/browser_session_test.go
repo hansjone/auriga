@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -221,10 +222,12 @@ func TestBrowserAPIRejectsSidBearerWithoutAuthoritativeSession(t *testing.T) {
 	backend.rows["cookie"] = row
 	store.Put("cookie", row)
 	host := addresses["portal"]
-	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+	// Minimal unsigned JWT shape with sid; Edge only peeks at the payload.
+	sidBearer := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"sid":"cached-session","ctx":"portal"}`)) + ".sig"
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer " + sidBearer}}, 401, "common.unauthenticated")
 	status, _ := entryRequest(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
 		"Cookie":        {"auriga_session=cookie; auriga_csrf=csrf"},
-		"Authorization": {"Bearer cached-sid-jwt"},
+		"Authorization": {"Bearer " + sidBearer},
 		"Origin":        {g.Cfg.Access.PortalURL()},
 		"X-Auriga-CSRF": {"csrf"},
 	})
@@ -245,11 +248,11 @@ func TestBrowserAPIRejectsSidBearerWithoutAuthoritativeSession(t *testing.T) {
 			}
 			requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
 				"Cookie":        {"auriga_session=cookie-" + mode + "; auriga_csrf=csrf"},
-				"Authorization": {"Bearer cached-sid-jwt"},
+				"Authorization": {"Bearer " + sidBearer},
 				"Origin":        {g.Cfg.Access.PortalURL()},
 				"X-Auriga-CSRF": {"csrf"},
 			}, want, code)
-			requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+			requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer " + sidBearer}}, 401, "common.unauthenticated")
 		})
 	}
 	backend.mode = ""
@@ -257,11 +260,11 @@ func TestBrowserAPIRejectsSidBearerWithoutAuthoritativeSession(t *testing.T) {
 	delete(backend.rows, "cookie")
 	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
 		"Cookie":        {"auriga_session=cookie; auriga_csrf=csrf"},
-		"Authorization": {"Bearer cached-sid-jwt"},
+		"Authorization": {"Bearer " + sidBearer},
 		"Origin":        {g.Cfg.Access.PortalURL()},
 		"X-Auriga-CSRF": {"csrf"},
 	}, 401, "common.unauthenticated")
-	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer " + sidBearer}}, 401, "common.unauthenticated")
 }
 
 func TestBrowserSessionsAcrossJWTLifetime(t *testing.T) {
