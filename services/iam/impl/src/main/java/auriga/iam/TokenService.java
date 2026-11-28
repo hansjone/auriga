@@ -227,6 +227,12 @@ public final class TokenService
     ObjectNode claims = base(tenant, subject, audience, principalType, context);
     Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
     if (notAfter != null && notAfter.isBefore(expiry)) expiry = notAfter;
+    // AccessTokenDecoders allow up to 60s clock skew on exp; keep JWT inside the
+    // session/device deadline even after that grace so Edge Bearer cannot outlive it.
+    if (notAfter != null) {
+      Instant skewSafe = notAfter.minusSeconds(60);
+      if (skewSafe.isBefore(expiry)) expiry = skewSafe;
+    }
     expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
     claims.put("exp", expiry.getEpochSecond());
@@ -284,6 +290,8 @@ public final class TokenService
         base(UUID.fromString(identity.tenant()), identity.account(), audience, "device", "device");
     Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
     if (identity.expiresAt().isBefore(expiry)) expiry = identity.expiresAt();
+    Instant skewSafe = identity.expiresAt().minusSeconds(60);
+    if (skewSafe.isBefore(expiry)) expiry = skewSafe;
     expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
     claims.put("exp", expiry.getEpochSecond());
@@ -326,6 +334,8 @@ public final class TokenService
         "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
     Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
     if (expiresAt.isBefore(expiry)) expiry = expiresAt;
+    Instant skewSafe = expiresAt.minusSeconds(60);
+    if (skewSafe.isBefore(expiry)) expiry = skewSafe;
     claims.put("exp", expiry.getEpochSecond());
     return new IssuedToken(signAccess(claims), expiry);
   }
@@ -340,7 +350,7 @@ public final class TokenService
     long expiry =
         Math.min(
             clock.instant().plusSeconds(ACCESS_TTL_SECONDS).getEpochSecond(),
-            identity.expiresAt().getEpochSecond());
+            identity.expiresAt().minusSeconds(60).getEpochSecond());
     if (expiry <= clock.instant().getEpochSecond()) return null;
     ObjectNode claims =
         base(

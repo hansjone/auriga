@@ -468,7 +468,11 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		return
 	}
 	pool, e := b.loadPool(r.Context(), tenant, poolID)
+	// Hide pool existence from unauthorized keys: missing and forbidden look the same.
 	if e != nil {
+		if errors.Is(e, missing) {
+			e = denied
+		}
 		reject(w, e)
 		return
 	}
