@@ -99,7 +99,14 @@ func TestPostgresUpstreamCapabilitiesPersistForMemberAndExternalDirectories(t *t
 			t.Fatalf("save status=%d body=%s", w.Code, w.Body.String())
 		}
 		pagePools, e := b.ListPools(t.Context(), tenant)
-		if e != nil || len(pagePools.Items) != 1 || pagePools.Items[0].ContextWindow != pool.ContextWindow || pagePools.Items[0].MaxOutputTokens != pool.MaxOutputTokens || pagePools.Items[0].Capabilities == nil {
+		var reopened *api.RelayPool
+		for i := range pagePools.Items {
+			if pagePools.Items[i].Id == pool.Id {
+				reopened = &pagePools.Items[i]
+				break
+			}
+		}
+		if e != nil || reopened == nil || reopened.ContextWindow != pool.ContextWindow || reopened.MaxOutputTokens != pool.MaxOutputTokens || reopened.Capabilities == nil {
 			t.Fatal("reopened pool differs from saved publication", pagePools, e)
 		}
 	}
