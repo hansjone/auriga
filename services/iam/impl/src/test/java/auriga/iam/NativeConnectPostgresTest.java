@@ -1400,6 +1400,7 @@ class NativeConnectPostgresTest {
           var token = connected();
           String did = tokens.verify(token.path("access_token").asString()).path("did").asString();
           String sid = store.tx(() -> store.get("device", did, false)).path("sessionId").asString();
+          // After +90s, touch would extend idle by 120s; keep absolute below that to prove the cap.
           Instant absolute = clock.instant().plusSeconds(150);
           store.tx(
               () -> {
@@ -1410,7 +1411,7 @@ class NativeConnectPostgresTest {
               });
           clock.now = clock.now.plusSeconds(90);
           var rotated = rotate(token);
-          assertTrue(rotated.has("access_token"));
+          assertTrue(rotated.has("access_token"), rotated.toString());
           assertEquals(
               absolute.toString(),
               store.tx(() -> sessions.activeById(sid)).path("idleExpiresAt").asString());

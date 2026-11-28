@@ -15,6 +15,17 @@ public final class TokenService
   /** Max platform/AI access JWT and managed-model verification lease; capped by backing expiry. */
   static final long ACCESS_TTL_SECONDS = Duration.ofDays(3).toSeconds();
 
+  /** Installation/service JWT TTL; publishers still refresh periodically for rotation. */
+  static final long INTERNAL_SERVICE_TTL_SECONDS = Duration.ofDays(1).toSeconds();
+
+  /**
+   * Prefer shrinking issued exp by the maximum {@link auriga.common.security.AccessTokenSettings}
+   * clock skew so a JWT cannot outlive session/device notAfter after verifier grace. When remaining
+   * lifetime is at most this window, issue until notAfter instead of refusing (short idle policies
+   * and late refresh still get a usable ticket).
+   */
+  static final long ACCESS_EXP_SKEW_SECONDS = 120;
+
   private final java.util.concurrent.ConcurrentMap<
           String, auriga.iam.api.CredentialMetadataSource.Entry>
       credentialMetadata = new java.util.concurrent.ConcurrentHashMap<>();
@@ -225,15 +236,8 @@ public final class TokenService
             .sorted()
             .toList();
     ObjectNode claims = base(tenant, subject, audience, principalType, context);
-    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
-    if (notAfter != null && notAfter.isBefore(expiry)) expiry = notAfter;
-    // AccessTokenDecoders allow up to 60s clock skew on exp; keep JWT inside the
-    // session/device deadline even after that grace so Edge Bearer cannot outlive it.
-    if (notAfter != null) {
-      Instant skewSafe = notAfter.minusSeconds(60);
-      if (skewSafe.isBefore(expiry)) expiry = skewSafe;
-    }
-    expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    Instant expiry =
+        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), notAfter);
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
     claims.put("exp", expiry.getEpochSecond());
     claims.set("perms", Json.MAPPER.valueToTree(perms));
@@ -279,6 +283,17 @@ public final class TokenService
 
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
+  /** Cap access exp by notAfter, reserving skew only while that still leaves a usable lifetime. */
+  Instant clampAccessExpiry(Instant proposed, Instant notAfter) {
+    Instant expiry = proposed;
+    if (notAfter != null && notAfter.isBefore(expiry)) expiry = notAfter;
+    if (notAfter != null) {
+      Instant skewSafe = notAfter.minusSeconds(ACCESS_EXP_SKEW_SECONDS);
+      if (clock.instant().isBefore(skewSafe) && skewSafe.isBefore(expiry)) expiry = skewSafe;
+    }
+    return expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+  }
+
   IssuedToken standardDevice(
       DeviceAccessAuthority.Identity identity,
       ObjectNode session,
@@ -288,11 +303,8 @@ public final class TokenService
       String memberType) {
     ObjectNode claims =
         base(UUID.fromString(identity.tenant()), identity.account(), audience, "device", "device");
-    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
-    if (identity.expiresAt().isBefore(expiry)) expiry = identity.expiresAt();
-    Instant skewSafe = identity.expiresAt().minusSeconds(60);
-    if (skewSafe.isBefore(expiry)) expiry = skewSafe;
-    expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    Instant expiry =
+        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), identity.expiresAt());
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
     claims.put("exp", expiry.getEpochSecond());
     claims.put("did", identity.device());
@@ -332,10 +344,8 @@ public final class TokenService
                     .contains(p));
     claims.set(
         "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
-    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
-    if (expiresAt.isBefore(expiry)) expiry = expiresAt;
-    Instant skewSafe = expiresAt.minusSeconds(60);
-    if (skewSafe.isBefore(expiry)) expiry = skewSafe;
+    Instant expiry =
+        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), expiresAt);
     claims.put("exp", expiry.getEpochSecond());
     return new IssuedToken(signAccess(claims), expiry);
   }
@@ -347,11 +357,10 @@ public final class TokenService
       Set<String> effective,
       JsonNode uacSessionBinding) {
     if (!effective.contains(DeviceAiResource.INVOKE)) return null;
-    long expiry =
-        Math.min(
-            clock.instant().plusSeconds(ACCESS_TTL_SECONDS).getEpochSecond(),
-            identity.expiresAt().minusSeconds(60).getEpochSecond());
-    if (expiry <= clock.instant().getEpochSecond()) return null;
+    Instant expires =
+        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), identity.expiresAt());
+    if (!clock.instant().isBefore(expires)) return null;
+    long expiry = expires.getEpochSecond();
     ObjectNode claims =
         base(
             UUID.fromString(identity.tenant()),
@@ -496,6 +505,7 @@ public final class TokenService
             "auriga.internal",
             "internal_service",
             "service");
+    claims.put("exp", clock.instant().getEpochSecond() + INTERNAL_SERVICE_TTL_SECONDS);
     String jwt = signAccess(claims);
     credentialMetadata.put(
         service,

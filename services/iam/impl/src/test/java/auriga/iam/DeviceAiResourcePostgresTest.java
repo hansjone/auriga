@@ -133,7 +133,8 @@ class DeviceAiResourcePostgresTest {
                           "portal",
                           true,
                           Duration.ofSeconds(600),
-                          Duration.ofSeconds(120));
+                          // Idle must exceed ACCESS_EXP_SKEW_SECONDS so AI tickets can still issue.
+                          Duration.ofSeconds(300));
                   sid = issued.session().path("sessionId").asString();
                   store.insert(
                       "device",
@@ -808,10 +809,10 @@ class DeviceAiResourcePostgresTest {
     assertEquals(
         Json.MAPPER.valueToTree(List.of("auriga.connect.models.invoke")), claims.path("perms"));
     assertEquals("auriga.connect", claims.path("scope").asString());
-    assertEquals(70, ai.path("expires_in").asInt());
-    assertEquals(
-        Instant.parse(before.path("idleExpiresAt").asString()).getEpochSecond(),
-        claims.path("exp").asLong());
+    long idleExp = Instant.parse(before.path("idleExpiresAt").asString()).getEpochSecond();
+    long skewSafe = idleExp - TokenService.ACCESS_EXP_SKEW_SECONDS;
+    assertEquals(skewSafe - clock.instant().getEpochSecond(), ai.path("expires_in").asInt());
+    assertEquals(skewSafe, claims.path("exp").asLong());
     assertEquals(before.path("idleExpiresAt"), session().path("idleExpiresAt"));
     assertEquals(before.path("expiresAt"), session().path("expiresAt"));
     ObjectNode platform = exchange(ai.path("refresh_token").asString(), false);
@@ -988,29 +989,32 @@ class DeviceAiResourcePostgresTest {
 
   @Test
   void idleOrAbsoluteExpiryCannotBeExtendedByAi() {
-    clock.now = clock.now.plusSeconds(121);
+    clock.now = clock.now.plusSeconds(301);
     assertEquals("invalid_grant", exchange(refresh, true).path("error").asString());
     assertFalse(grant().path("used").asBoolean());
   }
 
   @Test
   void absoluteDeadlineCapsAiEvenWhenIdleDeadlineIsLater() {
+    long absoluteSeconds = TokenService.ACCESS_EXP_SKEW_SECONDS + 31;
     TenantContext.run(
         tenant,
         () ->
             store.tx(
                 () -> {
                   ObjectNode row = store.byId("session", sid, true);
-                  row.put("expiresAt", clock.instant().plusSeconds(31).toString());
+                  row.put("expiresAt", clock.instant().plusSeconds(absoluteSeconds).toString());
                   store.save("session", row);
                   return null;
                 }));
     ObjectNode result = exchange(refresh, true);
     assertTrue(result.has("access_token"), result.toString());
-    assertEquals(31, result.path("expires_in").asInt());
+    long expectedExp =
+        clock.instant().plusSeconds(absoluteSeconds - TokenService.ACCESS_EXP_SKEW_SECONDS)
+            .getEpochSecond();
+    assertEquals(expectedExp - clock.instant().getEpochSecond(), result.path("expires_in").asInt());
     assertEquals(
-        clock.instant().plusSeconds(31).getEpochSecond(),
-        tokens.verify(result.path("access_token").asString()).path("exp").asLong());
+        expectedExp, tokens.verify(result.path("access_token").asString()).path("exp").asLong());
   }
 
   @Test

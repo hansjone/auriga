@@ -55,10 +55,20 @@ func TestPostgresUpstreamCapabilitiesPersistForMemberAndExternalDirectories(t *t
 			var response struct {
 				Data []map[string]any `json:"data"`
 			}
-			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || len(response.Data) != 1 {
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil {
 				t.Fatalf("directory status=%d body=%s", w.Code, w.Body.String())
 			}
-			entry := response.Data[0]
+			var entry map[string]any
+			for _, item := range response.Data {
+				if id, _ := item["id"].(string); id == pool.Id {
+					entry = item
+					break
+				}
+			}
+			// EnsureAurigaPool may also publish the fixed auriga placeholder.
+			if entry == nil {
+				t.Fatalf("directory missing %s body=%s", pool.Id, w.Body.String())
+			}
 			if context == 0 {
 				if _, exists := entry["context_window"]; exists {
 					t.Fatal("unknown context must be omitted", entry)

@@ -270,7 +270,12 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(403, "common.forbidden")
 		return
 	}
-	if !public && sess == nil && (!clientBearer || cookieOK || ipAdmin && isWriteMethod(r.Method)) {
+	// Portal/admin browser APIs require an authoritative cookie session. A
+	// client-held Bearer with sid must not outlive revoke or idle/absolute
+	// expiry; when the cookie session is valid Edge forwards the introspected
+	// access token, not the caller's cached JWT. Device/AI Bearers use other
+	// handlers.
+	if !public && sess == nil {
 		fail(401, "common.unauthenticated")
 		return
 	}

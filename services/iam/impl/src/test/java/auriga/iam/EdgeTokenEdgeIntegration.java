@@ -132,6 +132,7 @@ final class EdgeTokenEdgeIntegration {
       Object inode = Files.getAttribute(token, "unix:ino");
       advance(dir, 0);
       await(dir, process, 1);
+      long ttl = TokenService.INTERNAL_SERVICE_TTL_SECONDS;
       clock.now = clock.now.plusSeconds(240);
       time.now = clock.now;
       assertTrue(publisher.refresh());
@@ -140,7 +141,7 @@ final class EdgeTokenEdgeIntegration {
       assertNotEquals(first, second);
       advance(dir, 1);
       await(dir, process, 2);
-      clock.now = clock.now.plusSeconds(61);
+      clock.now = clock.now.plusSeconds(ttl - 240 + 1);
       time.now = clock.now;
       assertThrows(auriga.common.error.AurigaException.class, () -> verifier.verify(first));
       advance(dir, 2);

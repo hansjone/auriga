@@ -206,6 +206,64 @@ func browserRequest(g *Gateway, role, method, path, cookie string) *httptest.Res
 	return w
 }
 
+func TestBrowserAPIRejectsSidBearerWithoutAuthoritativeSession(t *testing.T) {
+	seen := 0
+	g, addresses, store := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen++
+		if r.Header.Get("Authorization") != "Bearer live-session-jwt" {
+			t.Errorf("upstream bearer=%q", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(204)
+	}))
+	backend, _ := browserRPCFixture(t, g, store)
+	row := putBrowserSession(g, backend, "cookie", "portal")
+	row.AccessToken = "live-session-jwt"
+	backend.rows["cookie"] = row
+	store.Put("cookie", row)
+	host := addresses["portal"]
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+	status, _ := entryRequest(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
+		"Cookie":        {"auriga_session=cookie; auriga_csrf=csrf"},
+		"Authorization": {"Bearer cached-sid-jwt"},
+		"Origin":        {g.Cfg.Access.PortalURL()},
+		"X-Auriga-CSRF": {"csrf"},
+	})
+	if status != 204 || seen != 1 {
+		t.Fatalf("live cookie session status=%d seen=%d", status, seen)
+	}
+	for _, mode := range []string{"idle-expired", "absolute"} {
+		t.Run(mode, func(t *testing.T) {
+			row := putBrowserSession(g, backend, "cookie-"+mode, "portal")
+			row.AccessToken = "stale-" + mode
+			row.AccessTokenExpiresAt = backend.now().Add(-time.Second)
+			backend.rows["cookie-"+mode] = row
+			store.Put("cookie-"+mode, row)
+			backend.mode = mode
+			want, code := 503, "common.unavailable"
+			if mode == "idle-expired" {
+				want, code = 401, "common.unauthenticated"
+			}
+			requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
+				"Cookie":        {"auriga_session=cookie-" + mode + "; auriga_csrf=csrf"},
+				"Authorization": {"Bearer cached-sid-jwt"},
+				"Origin":        {g.Cfg.Access.PortalURL()},
+				"X-Auriga-CSRF": {"csrf"},
+			}, want, code)
+			requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+		})
+	}
+	backend.mode = ""
+	store.Delete("cookie")
+	delete(backend.rows, "cookie")
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{
+		"Cookie":        {"auriga_session=cookie; auriga_csrf=csrf"},
+		"Authorization": {"Bearer cached-sid-jwt"},
+		"Origin":        {g.Cfg.Access.PortalURL()},
+		"X-Auriga-CSRF": {"csrf"},
+	}, 401, "common.unauthenticated")
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer cached-sid-jwt"}}, 401, "common.unauthenticated")
+}
+
 func TestBrowserSessionsAcrossJWTLifetime(t *testing.T) {
 	for _, domain := range []bool{false, true} {
 		for _, audience := range []string{"portal", "admin"} {

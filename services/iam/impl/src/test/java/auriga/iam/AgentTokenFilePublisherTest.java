@@ -125,8 +125,9 @@ class AgentTokenFilePublisherTest {
           PosixFilePermissions.fromString("rwx------"),
           Files.getPosixFilePermissions(token.getParent()));
       assertEquals("svc:agent", verifier.verify(first).subject());
+      long ttl = TokenService.INTERNAL_SERVICE_TTL_SECONDS;
       assertEquals(
-          300,
+          ttl,
           SignedJWT.parse(first).getJWTClaimsSet().getExpirationTime().toInstant().getEpochSecond()
               - time.instant().getEpochSecond());
       time.now = time.now.plusSeconds(240);
@@ -141,7 +142,7 @@ class AgentTokenFilePublisherTest {
       assertFalse(publisher.isRunning());
       assertFalse(publisher.refresh());
       assertEquals(second, Files.readString(token));
-      time.now = time.now.plusSeconds(301);
+      time.now = time.now.plusSeconds(ttl + 1);
       assertThrows(AurigaException.class, () -> verifier.verify(Files.readString(token)));
       assertEquals(second, Files.readString(token));
       Files.writeString(secret, credential);
