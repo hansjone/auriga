@@ -236,8 +236,7 @@ public final class TokenService
             .sorted()
             .toList();
     ObjectNode claims = base(tenant, subject, audience, principalType, context);
-    Instant expiry =
-        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), notAfter);
+    Instant expiry = clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), notAfter);
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
     claims.put("exp", expiry.getEpochSecond());
     claims.set("perms", Json.MAPPER.valueToTree(perms));
@@ -344,8 +343,7 @@ public final class TokenService
                     .contains(p));
     claims.set(
         "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
-    Instant expiry =
-        clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), expiresAt);
+    Instant expiry = clampAccessExpiry(clock.instant().plusSeconds(ACCESS_TTL_SECONDS), expiresAt);
     claims.put("exp", expiry.getEpochSecond());
     return new IssuedToken(signAccess(claims), expiry);
   }

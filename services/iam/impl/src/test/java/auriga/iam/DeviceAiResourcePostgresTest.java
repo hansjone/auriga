@@ -1010,7 +1010,9 @@ class DeviceAiResourcePostgresTest {
     ObjectNode result = exchange(refresh, true);
     assertTrue(result.has("access_token"), result.toString());
     long expectedExp =
-        clock.instant().plusSeconds(absoluteSeconds - TokenService.ACCESS_EXP_SKEW_SECONDS)
+        clock
+            .instant()
+            .plusSeconds(absoluteSeconds - TokenService.ACCESS_EXP_SKEW_SECONDS)
             .getEpochSecond();
     assertEquals(expectedExp - clock.instant().getEpochSecond(), result.path("expires_in").asInt());
     assertEquals(
