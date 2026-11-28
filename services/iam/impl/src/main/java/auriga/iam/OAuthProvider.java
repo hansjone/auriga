@@ -507,32 +507,34 @@ public final class OAuthProvider {
     boolean device = grant.has("deviceId");
     if (!UacSessions.boundTo(grant, session)) return error("invalid_grant");
     String scope = grant.path("scope").asString();
+    if (issued == null) {
+      Instant absolute = Instant.parse(session.path("expiresAt").asString());
+      Instant idle = Instant.parse(session.path("idleExpiresAt").asString());
+      Instant notAfter = idle.isBefore(absolute) ? idle : absolute;
+      issued =
+          tokens.issueAccess(
+              c.tenant(),
+              session.path("accountId").asString(),
+              c.audience(),
+              device ? "device" : "user",
+              device ? "device" : session.path("audience").asString(),
+              device ? null : UUID.fromString(session.path("sessionId").asString()),
+              device ? UUID.fromString(grant.path("deviceId").asString()) : null,
+              Instant.parse(session.path("authTime").asString()),
+              session.has("stepUpAt") ? Instant.parse(session.path("stepUpAt").asString()) : null,
+              scope,
+              session.path("memberType").asString("member"),
+              device ? session.get("uacSessionBinding") : null,
+              notAfter);
+    }
     ObjectNode response =
         Json.object(
             "access_token",
-            issued != null
-                ? issued.accessToken()
-                : tokens.access(
-                    c.tenant(),
-                    session.path("accountId").asString(),
-                    c.audience(),
-                    device ? "device" : "user",
-                    device ? "device" : session.path("audience").asString(),
-                    device ? null : UUID.fromString(session.path("sessionId").asString()),
-                    device ? UUID.fromString(grant.path("deviceId").asString()) : null,
-                    Instant.parse(session.path("authTime").asString()),
-                    session.has("stepUpAt")
-                        ? Instant.parse(session.path("stepUpAt").asString())
-                        : null,
-                    scope,
-                    session.path("memberType").asString("member"),
-                    device ? session.get("uacSessionBinding") : null),
+            issued.accessToken(),
             "token_type",
             "Bearer",
             "expires_in",
-            issued != null
-                ? issued.expiresAt().getEpochSecond() - clock.instant().getEpochSecond()
-                : TokenService.ACCESS_TTL_SECONDS,
+            issued.expiresAt().getEpochSecond() - clock.instant().getEpochSecond(),
             "scope",
             scope);
     if (scopes(scope).contains("openid") && !device)

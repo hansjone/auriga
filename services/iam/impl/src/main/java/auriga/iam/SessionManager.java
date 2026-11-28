@@ -113,9 +113,11 @@ public final class SessionManager implements Sessions {
   }
 
   private void refresh(ObjectNode row) {
-    Instant now = clock.instant();
-    String access =
-        tokens.access(
+    Instant absolute = Instant.parse(row.path("expiresAt").asString());
+    Instant idle = Instant.parse(row.path("idleExpiresAt").asString());
+    Instant notAfter = idle.isBefore(absolute) ? idle : absolute;
+    var issued =
+        tokens.issueAccess(
             TenantContext.require(),
             row.path("accountId").asString(),
             "auriga",
@@ -126,9 +128,11 @@ public final class SessionManager implements Sessions {
             Instant.parse(row.path("authTime").asString()),
             row.has("stepUpAt") ? Instant.parse(row.path("stepUpAt").asString()) : null,
             "openid",
-            row.path("memberType").asString("member"));
-    row.put("accessToken", access);
-    row.put("accessTokenExpiresAt", now.plusSeconds(TokenService.ACCESS_TTL_SECONDS).toString());
+            row.path("memberType").asString("member"),
+            null,
+            notAfter);
+    row.put("accessToken", issued.accessToken());
+    row.put("accessTokenExpiresAt", issued.expiresAt().toString());
     store.save("session", row);
     cache(row);
   }

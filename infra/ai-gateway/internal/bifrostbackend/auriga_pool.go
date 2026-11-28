@@ -143,8 +143,12 @@ func (b *Backend) EnsureAurigaPool(ctx context.Context, tenant string) error {
 		if e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3)`, tenant, defaultPoolID, raw); e != nil {
+		tag, e := tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO NOTHING`, tenant, defaultPoolID, raw)
+		if e != nil {
 			return e
+		}
+		if tag.RowsAffected() != 1 {
+			return nil
 		}
 		return audit.Record(ctx, tx, tenant, "ai.pool.create", "relay_pool", defaultPoolID)
 	})

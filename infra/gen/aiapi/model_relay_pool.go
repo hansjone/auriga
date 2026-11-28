@@ -49,8 +49,6 @@ func NewRelayPool(id string, enabled bool, routes []RelayRoute, contextWindow in
 	this.Id = id
 	this.Enabled = enabled
 	this.Routes = routes
-	var audience string = "both"
-	this.Audience = &audience
 	this.ContextWindow = contextWindow
 	this.MaxOutputTokens = maxOutputTokens
 	this.Price = price
@@ -62,8 +60,6 @@ func NewRelayPool(id string, enabled bool, routes []RelayRoute, contextWindow in
 // but it doesn't guarantee that properties required by API are set
 func NewRelayPoolWithDefaults() *RelayPool {
 	this := RelayPool{}
-	var audience string = "both"
-	this.Audience = &audience
 	return &this
 }
 

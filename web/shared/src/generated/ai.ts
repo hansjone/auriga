@@ -748,10 +748,9 @@ export interface components {
       routes: components['schemas']['RelayRoute'][];
       /**
        * @description 成员可见性。member：仅成员目录（成员 Key 的 * 展开）；external：仅对外 Key 显式勾选；both：两者。缺省按 both。内置 auriga 默认 member。
-       * @default both
        * @enum {string}
        */
-      audience: 'member' | 'external' | 'both';
+      audience?: 'member' | 'external' | 'both';
       /** @description 管理用组别，仅筛选归类，不参与鉴权。 */
       group?: string;
       /**

@@ -90,9 +90,7 @@ function managedModel(value) {
 }
 const BUILTIN_MODEL_ID = 'auriga';
 const hasBuiltinModel = (/** @type {any[]} */ models) =>
-  models.some(
-    (model) => object(model) && model.id === BUILTIN_MODEL_ID,
-  );
+  models.some((model) => object(model) && model.id === BUILTIN_MODEL_ID);
 
 /** @param {any} value */
 function managedProvider(value) {
@@ -127,8 +125,7 @@ function managedOperation(op, current) {
   const existing = Array.isArray(current?.models)
     ? current.models[index]
     : undefined;
-  const touchingBuiltin =
-    object(existing) && existing.id === BUILTIN_MODEL_ID;
+  const touchingBuiltin = object(existing) && existing.id === BUILTIN_MODEL_ID;
   if (path.length === 2) {
     if (op.op === 'unset' && touchingBuiltin) throw refuse();
     if (op.op === 'set') {
@@ -232,7 +229,9 @@ export function guardManagedSettings(settings) {
       if (args[0] === 'llm-pi-ai' && typeof settings?.describe === 'function') {
         const row = settings
           .describe()
-          ?.namespaces?.find((/** @type {any} */ item) => item.ns === 'llm-pi-ai');
+          ?.namespaces?.find(
+            (/** @type {any} */ item) => item.ns === 'llm-pi-ai',
+          );
         managed = row?.value?.providers?.['auriga-managed'];
       }
       authorize(method, args[0], args[1], managed);

@@ -453,21 +453,32 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, invalid)
 		return
 	}
+	// Keep the caller's model id on the wire (including legacy "auto"); only the
+	// pool lookup uses the canonical auriga id so responses stay caller-visible.
+	poolID := model
 	if model == legacyDefaultPoolID {
-		model = defaultPoolID
-		fields["model"], _ = json.Marshal(model)
+		poolID = defaultPoolID
 	}
 	if v := fields["stream"]; v != nil && json.Unmarshal(v, &stream) != nil {
 		reject(w, invalid)
 		return
 	}
-	pool, routes, e := b.poolRoutes(r.Context(), tenant, model)
+	if e := b.EnsureAurigaPool(r.Context(), tenant); e != nil {
+		reject(w, e)
+		return
+	}
+	pool, e := b.loadPool(r.Context(), tenant, poolID)
 	if e != nil {
 		reject(w, e)
 		return
 	}
 	if !chatAllows(key, pool) {
 		reject(w, denied)
+		return
+	}
+	routes, e := b.decryptPoolRoutes(r.Context(), tenant, pool)
+	if e != nil {
+		reject(w, e)
 		return
 	}
 	if e = b.reconcileSubject(r.Context(), tenant, key.Id); e != nil {

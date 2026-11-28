@@ -688,9 +688,8 @@ func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPag
 	})
 	return out, e
 }
-func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayPool, []Route, error) {
+func (b *Backend) loadPool(ctx context.Context, tenant, id string) (api.RelayPool, error) {
 	var p api.RelayPool
-	var routes []Route
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		var raw []byte
 		if e := tx.QueryRow(ctx, `SELECT document FROM ai.relay_pool WHERE tenant_id=$1 AND id=$2`, tenant, id).Scan(&raw); e != nil {
@@ -703,7 +702,17 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 			return denied
 		}
 		normalizePoolAudience(&p)
+		return nil
+	})
+	return p, e
+}
+
+// decryptPoolRoutes opens provider secrets only after the caller has authorized the pool.
+func (b *Backend) decryptPoolRoutes(ctx context.Context, tenant string, p api.RelayPool) ([]Route, error) {
+	var routes []Route
+	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		for _, r := range p.Routes {
+			var raw []byte
 			var cfg api.RelayProviderInput
 			var secret []byte
 			if e := tx.QueryRow(ctx, `SELECT document,secret FROM ai.relay_provider WHERE tenant_id=$1 AND id=$2`, tenant, r.ProviderId).Scan(&raw, &secret); e != nil {
@@ -730,6 +739,15 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 			e = fault("common.unavailable")
 		}
 	}
+	return routes, e
+}
+
+func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayPool, []Route, error) {
+	p, e := b.loadPool(ctx, tenant, id)
+	if e != nil {
+		return p, nil, e
+	}
+	routes, e := b.decryptPoolRoutes(ctx, tenant, p)
 	return p, routes, e
 }
 

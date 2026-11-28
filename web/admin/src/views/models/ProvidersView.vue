@@ -374,7 +374,8 @@ function askPool() {
     capabilityNotice.value = t('capabilityRefreshPending');
     return;
   }
-  if (draft.value.id === 'auriga' && (!poolsReady.value || loading.value)) return;
+  if (draft.value.id === 'auriga' && (!poolsReady.value || loading.value))
+    return;
   if (bodyIdBlocked(draft.value.id)) {
     error.value = t('invalid');
     return;
@@ -411,6 +412,7 @@ function askPool() {
   const emptyAuriga = body.id === 'auriga' && body.routes.length === 0;
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
+    !body.audience ||
     !['member', 'external', 'both'].includes(body.audience) ||
     (body.group !== undefined &&
       !/^[A-Za-z0-9][A-Za-z0-9._\- ]{0,63}$/.test(body.group)) ||

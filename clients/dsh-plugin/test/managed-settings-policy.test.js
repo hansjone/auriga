@@ -15,7 +15,11 @@ function fixture() {
       method,
       async (...args) => {
         calls.push({ method, args });
-        if (args[0] === 'llm-pi-ai' && method === 'update' && args[1]?.providers)
+        if (
+          args[0] === 'llm-pi-ai' &&
+          method === 'update' &&
+          args[1]?.providers
+        )
           llm = structuredClone(args[1]);
       },
     ]),

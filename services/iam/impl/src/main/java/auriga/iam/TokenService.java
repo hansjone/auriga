@@ -155,6 +155,38 @@ public final class TokenService
       String scope,
       String memberType,
       JsonNode uacSessionBinding) {
+    return issueAccess(
+            tenant,
+            subject,
+            audience,
+            principalType,
+            context,
+            session,
+            device,
+            authTime,
+            stepUp,
+            scope,
+            memberType,
+            uacSessionBinding,
+            null)
+        .accessToken();
+  }
+
+  /** Issue a platform/device access JWT; notAfter clamps exp to session/device deadlines. */
+  IssuedToken issueAccess(
+      UUID tenant,
+      String subject,
+      String audience,
+      String principalType,
+      String context,
+      UUID session,
+      UUID device,
+      Instant authTime,
+      Instant stepUp,
+      String scope,
+      String memberType,
+      JsonNode uacSessionBinding,
+      Instant notAfter) {
     IamError.require(
         !"internal_service".equals(principalType) && !"auriga.internal".equals(audience),
         "invalid_audience",
@@ -193,6 +225,11 @@ public final class TokenService
             .sorted()
             .toList();
     ObjectNode claims = base(tenant, subject, audience, principalType, context);
+    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
+    if (notAfter != null && notAfter.isBefore(expiry)) expiry = notAfter;
+    expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
+    claims.put("exp", expiry.getEpochSecond());
     claims.set("perms", Json.MAPPER.valueToTree(perms));
     claims.put("scope", scope);
     if (session != null) claims.put("sid", session.toString());
@@ -202,7 +239,7 @@ public final class TokenService
     if ("user".equals(principalType) || "device".equals(principalType))
       claims.put("mtyp", memberType);
     if (uacSessionBinding != null) claims.set("uacSessionBinding", uacSessionBinding);
-    return signAccess(claims);
+    return new IssuedToken(signAccess(claims), expiry);
   }
 
   static boolean allowedPermission(String permission, String context) {
