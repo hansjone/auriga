@@ -265,6 +265,13 @@ func TestBrowserAPIRejectsSidBearerWithoutAuthoritativeSession(t *testing.T) {
 		"X-Auriga-CSRF": {"csrf"},
 	}, 401, "common.unauthenticated")
 	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer " + sidBearer}}, 401, "common.unauthenticated")
+	// JWT-shaped tokens above the peek limit fail closed (treated as session-bound).
+	pad := strings.Repeat("a", 16384)
+	oversized := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"sid":"x"}`)) + "." + pad
+	if len(oversized) <= 16384 {
+		t.Fatalf("oversized fixture too small: %d", len(oversized))
+	}
+	requireEntryProblem(t, host, "GET", "/api/org/v1/members", g.Cfg.PortalHost, http.Header{"Authorization": {"Bearer " + oversized}}, 401, "common.unauthenticated")
 }
 
 func TestBrowserSessionsAcrossJWTLifetime(t *testing.T) {

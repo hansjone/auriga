@@ -533,10 +533,15 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap, authenti
 }
 
 // Unverified payload peek: browser access JWTs carry sid; device tickets do not.
+// Oversized JWT-shaped tokens cannot be peeked safely—fail closed as session-bound
+// so a padded ticket cannot skip the authoritative cookie session check.
 func accessTokenHasSID(token string) bool {
 	parts := strings.Split(token, ".")
-	if len(parts) != 3 || len(token) > 16384 {
+	if len(parts) != 3 {
 		return false
+	}
+	if len(token) > 16384 {
+		return true
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
