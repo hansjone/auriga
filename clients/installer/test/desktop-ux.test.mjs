@@ -192,6 +192,59 @@ test(
     assert.equal(transientAttempts, 2);
     unlockTransient();
 
+    // Regression: claim directory must not have a leading dot, transient EPERM
+    // on mkdir retries cleanly, and persistent EPERM surfaces lock diagnostics.
+    let mkdirCalls = 0;
+    const seenClaims = [];
+    const unlockRetryMkdir = acquireOperationLock(
+      join(base, 'mkdir-retry.lock'),
+      0,
+      {
+        mkdirRetryDelays: [1, 1],
+        mkdirSync(target, opts) {
+          if (!opts?.recursive) {
+            seenClaims.push(target);
+            if (++mkdirCalls === 1) {
+              throw Object.assign(new Error('transient AV hold'), {
+                code: 'EPERM',
+              });
+            }
+          }
+          return mkdirSync(target, opts);
+        },
+      },
+    );
+    assert.equal(mkdirCalls, 2);
+    assert.ok(
+      seenClaims.every((p) => !p.split(/[\\/]/).pop().startsWith('.')),
+      'claim directory must not start with a dot',
+    );
+    unlockRetryMkdir();
+
+    assert.throws(
+      () =>
+        acquireOperationLock(join(base, 'mkdir-denied.lock'), 0, {
+          mkdirRetryDelays: [1],
+          diagnose: true,
+          mkdirSync(target, opts) {
+            if (!opts?.recursive) {
+              throw Object.assign(new Error('blocked by EDR'), {
+                code: 'EPERM',
+              });
+            }
+            return mkdirSync(target, opts);
+          },
+        }),
+      (error) => {
+        assert.equal(error.code, 'desktop.lock_access_denied');
+        assert.equal(error.errno, 'EPERM');
+        assert.equal(error.diagnostics?.stage, 'mkdir-claim');
+        assert.equal(error.diagnostics?.lockDir, base);
+        assert.match(error.message, /desktop\.lock_access_denied/);
+        return true;
+      },
+    );
+
     const a = buildPayload(base, { name: 'a' });
     const b = buildPayload(base, { name: 'b', pluginVersion: '1.1.0' });
     for (const payload of [a, b])
