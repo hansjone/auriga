@@ -1,3 +1,4 @@
+/* global structuredClone */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -8,12 +9,24 @@ import {
 const denied = { code: 'common.forbidden' };
 function fixture() {
   const calls = [];
+  let llm;
   const service = Object.fromEntries(
     ['update', 'replace', 'mutate', 'prepareDocument'].map((method) => [
       method,
-      async (...args) => calls.push({ method, args }),
+      async (...args) => {
+        calls.push({ method, args });
+        if (
+          args[0] === 'llm-pi-ai' &&
+          method === 'update' &&
+          args[1]?.providers
+        )
+          llm = structuredClone(args[1]);
+      },
     ]),
   );
+  service.describe = () => ({
+    namespaces: [{ ns: 'llm-pi-ai', value: llm }],
+  });
   const cleanup = guardManagedSettings(service);
   return { service, calls, cleanup };
 }
@@ -94,7 +107,7 @@ test('managed native model rows remain editable while connection and storage fie
       'auriga-managed': {
         models: [
           {
-            id: 'auto',
+            id: 'auriga',
             name: '我的默认',
             contextWindow: 32768,
             maxTokens: 4096,
@@ -119,7 +132,8 @@ test('managed native model rows remain editable while connection and storage fie
     { headers: {} },
     { apiKeyEnv: 'PERSONAL' },
     { compat: { supportsStore: true } },
-    { models: [{ id: 'auto', compat: { supportsStore: true } }] },
+    { models: [{ id: 'auriga', compat: { supportsStore: true } }] },
+    { models: [{ id: 'other', name: 'other' }] },
   ]) {
     await assert.rejects(
       service.update('llm-pi-ai', { providers: { 'auriga-managed': value } }),

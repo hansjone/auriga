@@ -323,7 +323,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
     if (current == null) return null;
     Instant now = clock.instant();
     if (!now.isBefore(current.expiresAt())) return null;
-    Instant lease = now.plusSeconds(300);
+    Instant lease = now.plusSeconds(TokenService.ACCESS_TTL_SECONDS);
     return new DeviceAccessAuthority.Identity(
         current.tenant(),
         current.account(),

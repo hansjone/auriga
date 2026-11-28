@@ -237,7 +237,7 @@ NATS 失败不伪装数据库事务回滚，IP 管理写仍逐次在线失败关
 `Sessions` 和 `AccountDirectory` 本地接口复用生成的 protobuf 类型。
 调用方先绑定租户，不能从请求 body 的 tenant_id 切换租户；AccountService 允许内部服务。
 
-访问令牌统一 ES256、typ=at+jwt、5 分钟有效期；包含 tid/ptyp/ctx/jti/iat/exp，
+访问令牌统一 ES256、typ=at+jwt、最长 3 天有效期（仍受会话绝对/idle 截止约束）；包含 tid/ptyp/ctx/jti/iat/exp，
 浏览器含 sid，设备含 did，二次验证包含 stepup_time。用户和设备带 mtyp。
 portal 权限去掉 iam/org/ops 管理域和 admin/grant；设备只允许 auriga.connect
 命名空间且过滤 write/admin/grant。配置权限以 `auriga.iam.permissions` 的

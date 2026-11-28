@@ -16,7 +16,7 @@ Only `svc:ai-gateway` may submit the exact key through `VerifyDeviceAiAccess` wi
 a delegated non-platform tenant. IAM checks hash, tenant, member, instance,
 device, current workspace lifecycle counter/running intent, backing session,
 account, membership and model permission on every call. It rechecks the backing
-device after remote authorization and returns a lease of at most 300 seconds,
+device after remote authorization and returns a lease of at most 3 days,
 bounded by the backing expiry. It never creates a JWT, refresh grant or idle touch.
 All ordinary APIs, OAuth grants, network tickets and Team MCP continue to reject
 this model-only key. Dependency failures fail closed.

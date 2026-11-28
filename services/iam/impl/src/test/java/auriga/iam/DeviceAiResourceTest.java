@@ -108,8 +108,13 @@ class DeviceAiResourceTest {
       assertEquals("auriga.connect", claims.path("scope").asString());
       assertEquals(
           Json.MAPPER.valueToTree(List.of("auriga.connect.models.invoke")), claims.path("perms"));
+      long bound =
+          seconds > TokenService.ACCESS_EXP_SKEW_SECONDS
+              ? seconds - TokenService.ACCESS_EXP_SKEW_SECONDS
+              : seconds;
       assertEquals(
-          clock.instant().getEpochSecond() + Math.min(300, seconds), claims.path("exp").asLong());
+          clock.instant().getEpochSecond() + Math.min(TokenService.ACCESS_TTL_SECONDS, bound),
+          claims.path("exp").asLong());
       assertEquals(issued.expiresAt().getEpochSecond(), claims.path("exp").asLong());
       for (String field : List.of("roles", "sid", "instanceId", "credentialVersion"))
         assertFalse(claims.has(field));

@@ -487,7 +487,8 @@ final class StandardDevices {
         || claims.has("instanceId")
         || claims.has("roles")
         || claims.path("iat").asLong() > clock.instant().plusSeconds(30).getEpochSecond()
-        || claims.path("exp").asLong() > claims.path("iat").asLong() + 300) return null;
+        || claims.path("exp").asLong()
+            > claims.path("iat").asLong() + TokenService.ACCESS_TTL_SECONDS) return null;
     if ("auriga.ai-gateway".equals(aud)) {
       if (claims.path("perms").isEmpty()) return null;
       for (var permission : claims.path("perms"))

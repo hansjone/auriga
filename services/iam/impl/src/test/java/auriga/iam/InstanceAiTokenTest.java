@@ -178,9 +178,11 @@ class InstanceAiTokenTest {
     assertEquals(
         List.of("ai.models.invoke", "ai.usage.read"),
         Json.MAPPER.convertValue(claims.path("perms"), List.class));
-    assertEquals(300, claims.path("exp").asLong() - claims.path("iat").asLong());
     assertEquals(
-        clock.instant().plusSeconds(300).getEpochSecond(), response.getExpiresAt().getSeconds());
+        TokenService.ACCESS_TTL_SECONDS, claims.path("exp").asLong() - claims.path("iat").asLong());
+    assertEquals(
+        clock.instant().plusSeconds(TokenService.ACCESS_TTL_SECONDS).getEpochSecond(),
+        response.getExpiresAt().getSeconds());
     verify(accounts)
         .get(
             GetAccountRequest.newBuilder()

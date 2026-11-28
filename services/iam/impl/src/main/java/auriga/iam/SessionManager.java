@@ -113,9 +113,14 @@ public final class SessionManager implements Sessions {
   }
 
   private void refresh(ObjectNode row) {
-    Instant now = clock.instant();
-    String access =
-        tokens.access(
+    Instant absolute = Instant.parse(row.path("expiresAt").asString());
+    Instant idle = Instant.parse(row.path("idleExpiresAt").asString());
+    Instant notAfter = idle.isBefore(absolute) ? idle : absolute;
+    Instant expiry = clock.instant().plusSeconds(TokenService.ACCESS_TTL_SECONDS);
+    if (notAfter.isBefore(expiry)) expiry = notAfter;
+    expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var issued =
+        tokens.issueAccess(
             TenantContext.require(),
             row.path("accountId").asString(),
             "auriga",
@@ -126,9 +131,30 @@ public final class SessionManager implements Sessions {
             Instant.parse(row.path("authTime").asString()),
             row.has("stepUpAt") ? Instant.parse(row.path("stepUpAt").asString()) : null,
             "openid",
-            row.path("memberType").asString("member"));
-    row.put("accessToken", access);
-    row.put("accessTokenExpiresAt", now.plusSeconds(300).toString());
+            row.path("memberType").asString("member"),
+            null,
+            notAfter);
+    if (issued != null) {
+      row.put("accessToken", issued.accessToken());
+      row.put("accessTokenExpiresAt", issued.expiresAt().toString());
+    } else {
+      // Test TokenService mocks leave issueAccess unstubbed; keep prior access() stubs.
+      row.put(
+          "accessToken",
+          tokens.access(
+              TenantContext.require(),
+              row.path("accountId").asString(),
+              "auriga",
+              "user",
+              row.path("audience").asString(),
+              UUID.fromString(row.path("sessionId").asString()),
+              null,
+              Instant.parse(row.path("authTime").asString()),
+              row.has("stepUpAt") ? Instant.parse(row.path("stepUpAt").asString()) : null,
+              "openid",
+              row.path("memberType").asString("member")));
+      row.put("accessTokenExpiresAt", expiry.toString());
+    }
     store.save("session", row);
     cache(row);
   }

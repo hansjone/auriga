@@ -292,7 +292,7 @@ test('K2 device projection uses authoritative member and source; AI claims keep 
   );
   for (const invalid of [
     { ...claims, perms: ['iam.providers.write'] },
-    { ...claims, exp: now + 600 },
+    { ...claims, exp: now + 259201 },
     { ...claims, sid: randomUUID() },
     { ...claims, uacSessionBinding: { ...source, authGeneration: 3 } },
   ])

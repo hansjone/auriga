@@ -126,7 +126,7 @@ public final class DeviceAiAccessAuthority {
     return issued <= now + 30
         && expires > now
         && expires > issued
-        && issued >= expires - 300
+        && issued >= expires - TokenService.ACCESS_TTL_SECONDS
         && (!c.has("nbf")
             || c.path("nbf").isIntegralNumber()
                 && c.path("nbf").canConvertToLong()

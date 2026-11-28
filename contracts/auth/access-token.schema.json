@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Auriga 访问令牌声明 v1",
-  "description": "iam 签发的 JWT（RFC 9068：JOSE 头 `typ` 必须是 `at+jwt`，ES256，带 kid），有效期 5 分钟。业务服务用 iam 的 JWKS 自行校验，必须检查 typ、iss、aud（含 `auriga`）、exp。ID token 的 typ 不同，不能当访问令牌用。签给第三方 OIDC 客户端的令牌 aud 只有客户端 id、不含 `auriga`，平台服务一律拒绝。权限在签发时从 org 取（GetEffectivePermissions），最长 5 分钟有效；收到 user.permissions_changed 后 iam 让 edge 尽快换新令牌。",
+  "description": "iam 签发的 JWT（RFC 9068：JOSE 头 `typ` 必须是 `at+jwt`，ES256，带 kid），有效期最长 3 天（仍受会话绝对/idle 截止约束）。业务服务用 iam 的 JWKS 自行校验，必须检查 typ、iss、aud（含 `auriga`）、exp。ID token 的 typ 不同，不能当访问令牌用。签给第三方 OIDC 客户端的令牌 aud 只有客户端 id、不含 `auriga`，平台服务一律拒绝。权限在签发时从 org 取（GetEffectivePermissions）；收到 user.permissions_changed 后 iam 让 edge 尽快换新令牌。",
   "type": "object",
   "properties": {
     "uacSessionBinding": {

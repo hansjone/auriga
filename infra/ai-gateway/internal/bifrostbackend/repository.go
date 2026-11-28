@@ -33,6 +33,7 @@ import (
 const maxInteger int64 = 9007199254740991
 
 var modelID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+var poolGroup = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\- ]{0,63}$`)
 
 type fault string
 
@@ -522,9 +523,12 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 	if err := normalizePoolSave(&p); err != nil {
 		return err
 	}
-	providers, err := routeProviders(p.Routes)
-	if err != nil {
-		return err
+	providers := map[string]bool{}
+	if len(p.Routes) > 0 {
+		providers, err = routeProviders(p.Routes)
+		if err != nil {
+			return err
+		}
 	}
 	return b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		for id := range providers {
@@ -573,8 +577,33 @@ func normalizePoolSave(p *api.RelayPool) error {
 	if !modelID.MatchString(p.Id) {
 		return invalidField("/id")
 	}
-	if len(p.Routes) < 1 || len(p.Routes) > 8 {
+	if p.Id == legacyDefaultPoolID {
+		return invalidField("/id")
+	}
+	if len(p.Routes) > 8 || (len(p.Routes) < 1 && p.Id != defaultPoolID) {
 		return invalidField("/routes")
+	}
+	if len(p.Routes) > 0 {
+		if _, err := routeProviders(p.Routes); err != nil {
+			return invalidField("/routes")
+		}
+	}
+	switch p.GetAudience() {
+	case "":
+		if p.Id == defaultPoolID {
+			p.SetAudience("member")
+		} else {
+			p.SetAudience("both")
+		}
+	case "member", "external", "both":
+	default:
+		return invalidField("/audience")
+	}
+	if p.Group != nil {
+		g := *p.Group
+		if len(g) < 1 || len(g) > 64 || !poolGroup.MatchString(g) {
+			return invalidField("/group")
+		}
 	}
 	if !validPoolCapabilities(p.ContextWindow, p.MaxOutputTokens) {
 		return invalidField("/contextWindow")
@@ -623,6 +652,9 @@ func routeProviders(routes []api.RelayRoute) (map[string]bool, error) {
 	return providers, nil
 }
 func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPage) (api.RelayPoolPage, error) {
+	if err := b.EnsureAurigaPool(ctx, tenant); err != nil {
+		return api.RelayPoolPage{}, err
+	}
 	page := pageFor(pages)
 	out := api.RelayPoolPage{Items: []api.RelayPool{}}
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
@@ -645,6 +677,7 @@ func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPag
 			if json.Unmarshal(raw, &p) != nil {
 				return denied
 			}
+			normalizePoolAudience(&p)
 			p, e = resolvePoolCapabilities(p)
 			if e != nil {
 				return e
@@ -655,9 +688,8 @@ func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPag
 	})
 	return out, e
 }
-func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayPool, []Route, error) {
+func (b *Backend) loadPool(ctx context.Context, tenant, id string) (api.RelayPool, error) {
 	var p api.RelayPool
-	var routes []Route
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		var raw []byte
 		if e := tx.QueryRow(ctx, `SELECT document FROM ai.relay_pool WHERE tenant_id=$1 AND id=$2`, tenant, id).Scan(&raw); e != nil {
@@ -669,7 +701,18 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 		if json.Unmarshal(raw, &p) != nil || !p.Enabled {
 			return denied
 		}
+		normalizePoolAudience(&p)
+		return nil
+	})
+	return p, e
+}
+
+// decryptPoolRoutes opens provider secrets only after the caller has authorized the pool.
+func (b *Backend) decryptPoolRoutes(ctx context.Context, tenant string, p api.RelayPool) ([]Route, error) {
+	var routes []Route
+	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		for _, r := range p.Routes {
+			var raw []byte
 			var cfg api.RelayProviderInput
 			var secret []byte
 			if e := tx.QueryRow(ctx, `SELECT document,secret FROM ai.relay_provider WHERE tenant_id=$1 AND id=$2`, tenant, r.ProviderId).Scan(&raw, &secret); e != nil {
@@ -690,8 +733,21 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 		return nil
 	})
 	if e == nil && len(routes) == 0 {
-		e = fault("common.unavailable")
+		if len(p.Routes) == 0 {
+			e = invalidField("/routes")
+		} else {
+			e = fault("common.unavailable")
+		}
 	}
+	return routes, e
+}
+
+func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayPool, []Route, error) {
+	p, e := b.loadPool(ctx, tenant, id)
+	if e != nil {
+		return p, nil, e
+	}
+	routes, e := b.decryptPoolRoutes(ctx, tenant, p)
 	return p, routes, e
 }
 

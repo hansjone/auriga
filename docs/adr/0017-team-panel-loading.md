@@ -58,7 +58,7 @@
 - **托管**：浏览器直接 `fetch('/api/...')`，带平台会话 cookie（`HttpOnly; SameSite=Lax`，edge 校验）。令牌根本不在浏览器脚本里；edge 转发到实例前剥掉 `auriga_*` cookie 和 `Authorization`（原型的模拟 edge 已做，平台日志证明实例侧看不到）。
 - **连接**：`context.fetch` 指向插件的同源路由 `auriga/platform/<平台路径>`；插件在 Node 里加 `Authorization: Bearer <设备访问令牌>`。令牌从不进入页面（测试：`bootstrap`、代理响应里都不含令牌；页面带来的 `cookie`/`Authorization` 被丢弃；`set-cookie`/`www-authenticate` 不回传；只允许平台 `/api/` 路径，拒绝 `..`、绝对 URL、反斜杠；重定向一律拒绝；请求体 ≤ 1 MiB）。这条路径还有一个好处：不需要平台为 `dsh-app://app`/loopback 配 CORS。
 - 对比"注入 `context.fetch` 的闭包里持有令牌"：闭包里的令牌页面里任何脚本都能通过调试/猴子补丁取到；代理做法把令牌留在 Node 进程，**最简单且不暴露**。两种模式面板代码相同——都只调 `context.fetch('/api/…')`，区别在宿主怎么实现 `fetch`。
-- 访问令牌 5 分钟过期怎么刷新：插件 Node 侧持有刷新令牌，代理在 401 前主动刷新（原型用固定令牌，`getToken()` 是每次现取的函数，留好了接口）。
+- 访问令牌最长 3 天过期怎么刷新：插件 Node 侧持有刷新令牌，代理在 401 前主动刷新（原型用固定令牌，`getToken()` 是每次现取的函数，留好了接口）。
 
 ### 5. 面板和宿主的约定够不够
 

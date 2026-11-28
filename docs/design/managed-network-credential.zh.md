@@ -6,7 +6,7 @@ IAM 是唯一签发方。workspace 经受认证内部接口提交 tenant、成�
 
 契约新增内部托管凭据签发/吊销接口、外部换取接口及节点 Secrets 字段。网络是附加能力：永久拒绝记录 disabled/permission_denied 后照常无网络启动；暂时失败最多等30秒后先启动，后台每30秒有界探测，材料到位后排重启下发。Instance 的 managedNetworkState/Reason 供查询。workspace 把凭据经现有 HPKE 封装与规格一起下发；agent renderer 解密后原子写入实例材料目录的 0600 文件，以 `AURIGA_DEVICE_CREDENTIAL_FILE` 传递路径。平台 URL、网络安装信任根等非机密材料沿可信渲染配置下发，机密不进入环境变量、镜像或日志。
 
-managed 插件从文件读取凭据，以专用 managed-device grant 向既有 `/oauth2/token` 换取最长300秒设备 Bearer，并在到期前续期。凭据最长30天，到期后拒绝，重启轮换。通过同一 `createDeviceProvider`、network lifecycle/runtime、原生宿主适配和 consent 接线注册/取票、入网和发送；入网成功仅在严格 READY 后返回，发送沿用同一运行时状态门禁。凭据核验失败才计入租户、实例与可信edge客户端IP失败桶，正确凭据不受失败桶影响；429时沿用尚未过期Bearer并退避，到期仍失败才撤工具。其他核验失败关闭旧代，迟到结果不能恢复旧代。
+managed 插件从文件读取凭据，以专用 managed-device grant 向既有 `/oauth2/token` 换取最长 3 天设备 Bearer，并在到期前续期。凭据最长30天，到期后拒绝，重启轮换。通过同一 `createDeviceProvider`、network lifecycle/runtime、原生宿主适配和 consent 接线注册/取票、入网和发送；入网成功仅在严格 READY 后返回，发送沿用同一运行时状态门禁。凭据核验失败才计入租户、实例与可信edge客户端IP失败桶，正确凭据不受失败桶影响；429时沿用尚未过期Bearer并退避，到期仍失败才撤工具。其他核验失败关闭旧代，迟到结果不能恢复旧代。
 
 换票错误码：仅在随机材料散列及租户、成员、实例、设备归属核对通过之后，设备或材料撤销、材料过期、成员移除/禁用或网络权限撤回、实例删除/停止或代次绑定失效、后端会话失效统一返回 HTTP 403 `network.revoked`；不计入未验真失败桶，客户端永久拒绝同材料并提示从门户重新进入。未验真材料（错误/缺失凭据、未知设备、错租户/成员/实例、格式错误）返回 `common.forbidden` 并按原阈值计失败桶，桶满仍返回 429 `common.rate_limited`。换代后旧散列已被替换或权威记录已清理时，旧材料无法再验真，同样返回通用拒绝。权威查询故障返回 503 `common.unavailable`，保持失败封闭并允许退避；普通 401/403 不证明永久撤销。JWKS 是公钥发现入口，不构成材料撤销权威；托管续期重复使用此 grant，不签发 refresh token。
 

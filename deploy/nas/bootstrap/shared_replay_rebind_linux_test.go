@@ -19,7 +19,7 @@ func TestSharedReplayBindingIgnoresOnlyRotatableFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	rotated := base
-	rotated.Model, rotated.Profile, rotated.Files = "auto", strings.Repeat("f", 64), strings.Repeat("0", 64)
+	rotated.Model, rotated.Profile, rotated.Files = "auriga", strings.Repeat("f", 64), strings.Repeat("0", 64)
 	if got, _ := sharedReplayBinding(&rotated); got != want {
 		t.Fatal("model/profile/file rotation must keep the replay binding")
 	}

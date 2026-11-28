@@ -103,7 +103,7 @@ function assertBoundary(input) {
   }
   assert.deepEqual(named(pkg('agent-loop'))[0].config.agents, []);
   assert.equal(named(pkg('tools'))[0].config.mode, 'native');
-  assert.equal(named(pkg('agent-default-model'))[0].config.model, 'auto');
+  assert.equal(named(pkg('agent-default-model'))[0].config.model, 'auriga');
 }
 
 test('complete profile is a literal entry list with a single restricted Host and immutable browser export', () => {

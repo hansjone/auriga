@@ -26,7 +26,8 @@ var managedSecret = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 const platformTenant = "00000000-0000-0000-0000-000000000000"
 
-// IAM owns the 300s lease; permit bounded cross-host clock skew, never expired leases.
+// IAM owns the AI access lease (3d); permit bounded cross-host clock skew, never expired leases.
+const managedMaxLease = 3 * 24 * time.Hour
 const managedLeaseClockSkew = 5 * time.Second
 
 type fault string
@@ -73,7 +74,7 @@ func memberType(t org.MemberType) bool {
 
 // Check forwards the EXACT bounded raw token to IAM on EVERY call. The parsed
 // claims select the delegated route and expected identity only; IAM alone owns
-// signature/issuer/typ/ES256/audience/300s/device/backing-session verification.
+// signature/issuer/typ/ES256/audience/≤3d/device/backing-session verification.
 // No JWT roles, platform/admin/instance permissions or CheckPermission.resource
 // can establish member model ACL. No idle-touch or refresh operation is invoked.
 func (a *Authority) Check(ctx context.Context, raw string) (_ *Identity, resultErr error) {
@@ -144,7 +145,7 @@ func (a *Authority) Check(ctx context.Context, raw string) (_ *Identity, resultE
 		return nil, fault("common.unauthenticated")
 	}
 	reason = "lease_window_invalid"
-	if managed && end.AsTime().After(a.now().Add(300*time.Second+managedLeaseClockSkew)) || !managed && end.AsTime().After(claims.ExpiresAt.Time) {
+	if managed && end.AsTime().After(a.now().Add(managedMaxLease+managedLeaseClockSkew)) || !managed && end.AsTime().After(claims.ExpiresAt.Time) {
 		return nil, fault("common.unauthenticated")
 	}
 	leaseValid = true

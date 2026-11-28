@@ -276,7 +276,7 @@
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
     provider: auriga-shared
-    model: auto
+    model: auriga
 - id: skills
   name: '@deepseek-ai/dsh-skill'
 - id: platform-skills

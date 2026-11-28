@@ -110,14 +110,14 @@ sh deploy/nas/scripts/start.sh
 
 ```sh
 sh deploy/nas/scripts/shared-install.sh \
-  --set-model auto --expected-base-sha256 "$BASE_SHA256"
+  --set-model auriga --expected-base-sha256 "$BASE_SHA256"
 sh deploy/nas/scripts/shared-install.sh \
   --set-profile "$NEW_PROFILE" --profile-sha256 "$NEW_PROFILE_SHA" \
   --expected-base-sha256 "$BASE_SHA256"
 sh deploy/nas/scripts/start.sh
 ```
 
-一次维护窗口若两者都要做，推荐顺序：先 `set-profile` 新 profile 并 commit，再 `set-model auto` 并 commit，最后 `render`/`start.sh`。新版生产策略不接受旧 profile，`set-profile` 起始时只对即将被替换的旧 profile 免检生产策略（回执、摘要、事件、权限照常校验），而 `set-model` 读当前代时要求 profile 已符合新策略，所以必须先换 profile。二者不能交叠（一种仍 staged 时另一种会拒绝）。同参数重入幂等；不同参数冲突拒绝；profile 须字节与独立 SHA 一致且通过生产 `ValidateSharedProfile`（`agent-default-model` 固定为 `auto`）。commit 与 render 之后必须再跑 `start.sh`；一般无需清共享池。
+一次维护窗口若两者都要做，推荐顺序：先 `set-profile` 新 profile 并 commit，再 `set-model auriga` 并 commit，最后 `render`/`start.sh`。新版生产策略不接受旧 profile，`set-profile` 起始时只对即将被替换的旧 profile 免检生产策略（回执、摘要、事件、权限照常校验），而 `set-model` 读当前代时要求 profile 已符合新策略，所以必须先换 profile。二者不能交叠（一种仍 staged 时另一种会拒绝）。同参数重入幂等；不同参数冲突拒绝；profile 须字节与独立 SHA 一致且通过生产 `ValidateSharedProfile`（`agent-default-model` 固定为 `auriga`）。commit 与 render 之后必须再跑 `start.sh`；一般无需清共享池。
 
 ## 显式更换已安装的公司 UAC adapter
 

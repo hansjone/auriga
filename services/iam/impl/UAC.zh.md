@@ -90,7 +90,7 @@ Compose 与 NAS 的 `auriga-dsh` 登记为 platform 公共设备客户端：`nat
 
 批准从当前权威门户 session 保存设备、provider、账号与 UAC 来源绑定。标准平台票只有字符串 `aud=auriga`、`ptyp=ctx=device`、`did`，没有浏览器 `sid` 或实例身份。C 用 Bearer 访问 `GET /api/iam/v1/me/device-session` 取得冻结的 `StandardDeviceIdentity`，逐项比较 JWT 与来源绑定；此入口不接受身份选择参数、不返回凭据、不延长来源 idle。本人 UAC 凭据读取也在线验证标准设备来源，原始凭据仍只允许受信后端消费。
 
-普通 refresh 与 `resource=urn:auriga:ai-gateway` 换票共用同一 refresh 家族，C 必须使用单一串行 broker，每次先原子保存后继 refresh。AI 票只含当前模型/协作权限交集，字符串 `aud=auriga.ai-gateway`，寿命不超过 300 秒及来源/设备截止。所有刷新、身份读取和准入核验检查来源、成员、provider、客户端与 UAC 认证代次；不延长来源期限。参数非法、Org 不可用或签发失败均不消费旧 refresh；合法重放仅撤本设备家族。
+普通 refresh 与 `resource=urn:auriga:ai-gateway` 换票共用同一 refresh 家族，C 必须使用单一串行 broker，每次先原子保存后继 refresh。AI 票只含当前模型/协作权限交集，字符串 `aud=auriga.ai-gateway`，寿命不超过 3 天及来源/设备截止。所有刷新、身份读取和准入核验检查来源、成员、provider、客户端与 UAC 认证代次；不延长来源期限。参数非法、Org 不可用或签发失败均不消费旧 refresh；合法重放仅撤本设备家族。
 
 网关须使用新 `VerifyStandardDeviceAiAccess` RPC，内部身份限定 `svc:ai-gateway`，委派业务 tenant，传原始 AI JWT 和完整的 `auriga.connect.models.invoke` 或 `auriga.connect.collab.use` 权限键。旧 `VerifyDeviceAiAccess` 拒绝标准设备，继续承接 native/managed 专票；旧平台核验不接受 AI audience。目前网关消费者仍调用旧 RPC，需其所属工作线接入后才能声称标准设备模型请求已贯通。
 

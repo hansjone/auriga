@@ -68,7 +68,7 @@ class GatewayTokenFilePublisherTest extends EdgeTokenFilePublisherTest {
         assertThrows(AurigaException.class, () -> issuer.issue("ai-gateway", Secrets.random()))
             .errorCode()
             .code());
-    time.now = time.now.plusSeconds(301);
+    time.now = time.now.plusSeconds(TokenService.INTERNAL_SERVICE_TTL_SECONDS + 1);
     assertEquals(
         "common.unauthenticated",
         assertThrows(AurigaException.class, () -> verifier.verify(jwt)).errorCode().code());

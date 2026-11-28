@@ -145,8 +145,9 @@ class EdgeTokenFilePublisherTest {
       String first = Files.readString(token);
       Object inode = Files.getAttribute(token, "unix:ino");
       assertEquals("svc:" + service(), verifier.verify(first).subject());
+      long ttl = TokenService.INTERNAL_SERVICE_TTL_SECONDS;
       assertEquals(
-          300,
+          ttl,
           SignedJWT.parse(first).getJWTClaimsSet().getExpirationTime().toInstant().getEpochSecond()
               - time.instant().getEpochSecond());
       time.now = time.now.plusSeconds(240);
@@ -157,7 +158,8 @@ class EdgeTokenFilePublisherTest {
       assertEquals(
           PosixFilePermissions.fromString("rw-r-----"), Files.getPosixFilePermissions(token));
       assertEquals(gid(), Files.getAttribute(token, "unix:gid"));
-      time.now = time.now.plusSeconds(61);
+      // Past the first ticket, still inside the refreshed ticket's lifetime.
+      time.now = time.now.plusSeconds(ttl - 240 + 1);
       assertEquals(
           "common.unauthenticated",
           assertThrows(AurigaException.class, () -> verifier.verify(first)).errorCode().code());
@@ -307,7 +309,7 @@ class EdgeTokenFilePublisherTest {
       assertTrue(publisher.refresh());
       String previous = Files.readString(token);
       unavailable.set(true);
-      time.now = time.now.plusSeconds(301);
+      time.now = time.now.plusSeconds(TokenService.INTERNAL_SERVICE_TTL_SECONDS + 1);
       assertFalse(publisher.refresh());
       assertEquals(previous, Files.readString(token));
       assertEquals(

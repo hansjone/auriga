@@ -71,8 +71,8 @@ afterEach(() => {
   for (const key of Object.keys(routeQuery)) delete routeQuery[key];
 });
 it('rejects context one before confirmation while retaining zero as unknown', async () => {
-  const auto = {
-    id: 'auto',
+  const auriga = {
+    id: 'auriga',
     enabled: true,
     contextWindow: 1,
     maxOutputTokens: 0,
@@ -85,7 +85,7 @@ it('rejects context one before confirmation while retaining zero as unknown', as
       effectiveAt: '2026-01-01T00:00:00Z',
     },
   };
-  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auriga] });
   const w = mount(ProvidersView, { global });
   await flushPromises();
   await openAuto(w);
@@ -99,7 +99,8 @@ it('rejects context one before confirmation while retaining zero as unknown', as
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
     {
-      ...auto,
+      ...auriga,
+      audience: 'member',
       contextWindow: 0,
       capabilities: {
         sourceProviderId: p.id,
@@ -122,7 +123,7 @@ it('makes member metering explicit while external keys start without traffic lim
     active: true,
     monthlyBudgetMicros: 0,
     requestsPerMinute: 0,
-    models: ['auto'],
+    models: ['auriga'],
     maxConcurrency: 0,
     maxInFlightTokens: 0,
     meteringOnly: true,
@@ -151,8 +152,8 @@ it('makes member metering explicit while external keys start without traffic lim
   w.unmount();
 });
 it('saves different models from the same provider in auto and identifies an exact duplicate', async () => {
-  const auto = {
-    id: 'auto',
+  const auriga = {
+    id: 'auriga',
     enabled: true,
     contextWindow: 1000000,
     maxOutputTokens: 4096,
@@ -168,7 +169,7 @@ it('saves different models from the same provider in auto and identifies an exac
       effectiveAt: '2026-01-01T00:00:00Z',
     },
   };
-  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auriga] });
   const w = mount(ProvidersView, { global });
   await flushPromises();
   await openAuto(w);
@@ -178,7 +179,8 @@ it('saves different models from the same provider in auto and identifies an exac
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
     {
-      ...auto,
+      ...auriga,
+      audience: 'member',
       capabilities: {
         sourceProviderId: p.id,
         sourceModel: 'first',
@@ -197,11 +199,11 @@ it('saves different models from the same provider in auto and identifies an exac
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
   w.unmount();
 });
-it('creates auto through the regular pool form without publishing a fake pool', async () => {
+it('creates auriga through the regular pool form without publishing a fake pool', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
   expect(w.find('[data-testid="configure-auto"]').exists()).toBe(false);
-  expect(w.text()).toContain('ID 为 auto 的池即 DSH 默认模型');
+  expect(w.text()).toContain('ID 为 auriga 的池即 DSH 默认内置模型');
   await openAuto(w);
   const id = w.get('[name="poolId"]').element as HTMLInputElement;
   expect(id.value).toBe('');
@@ -210,9 +212,9 @@ it('creates auto through the regular pool form without publishing a fake pool', 
   w.unmount();
 });
 
-it('auto entry edits the current auto routes while retaining legacy pools', async () => {
-  const auto = {
-    id: 'auto',
+it('auriga entry edits the current auriga routes while retaining legacy pools', async () => {
+  const auriga = {
+    id: 'auriga',
     enabled: true,
     contextWindow: 32000,
     maxOutputTokens: 2000,
@@ -226,7 +228,7 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
     },
   };
   vi.mocked(relayApi.pools).mockResolvedValue({
-    items: [auto, { ...auto, id: 'legacy' }],
+    items: [auriga, { ...auriga, id: 'legacy' }],
   });
   const w = mount(ProvidersView, { global });
   await flushPromises();
@@ -242,7 +244,8 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
     {
-      ...auto,
+      ...auriga,
+      audience: 'member',
       capabilities: {
         sourceProviderId: p.id,
         sourceModel: 'actual-model',
@@ -273,7 +276,7 @@ it('keeps pool editing disabled until a successful current pool snapshot is avai
   complete({
     items: [
       {
-        id: 'auto',
+        id: 'auriga',
         enabled: true,
         contextWindow: 64000,
         maxOutputTokens: 8192,
@@ -316,7 +319,7 @@ it('invalidates an Auto draft before reloading, and a failed reload never leaves
   const w = mount(ProvidersView, { global });
   await flushPromises();
   await openAuto(w);
-  await w.get('[name="poolId"]').setValue('auto');
+  await w.get('[name="poolId"]').setValue('auriga');
   expect(w.find('[name="poolId"]').exists()).toBe(true);
   vi.mocked(relayApi.pools).mockRejectedValue(new Error('reload-fixture'));
   await w.findAll('header button')[0]!.trigger('click');
@@ -337,7 +340,7 @@ it('creates a genuinely absent Auto through create-only protection and never fal
   const w = mount(ProvidersView, { global });
   await flushPromises();
   await openAuto(w);
-  await w.get('[name="poolId"]').setValue('auto');
+  await w.get('[name="poolId"]').setValue('auriga');
   await w
     .findAll('button')
     .find((button) => button.text() === '添加池路由')!
@@ -351,7 +354,7 @@ it('creates a genuinely absent Auto through create-only protection and never fal
   await flushPromises();
   expect(relayApi.createPool).toHaveBeenCalledWith(
     expect.objectContaining({
-      id: 'auto',
+      id: 'auriga',
       routes: [{ providerId: p.id, model: 'real-auto', weight: 1 }],
     }),
     expect.any(String),
@@ -822,11 +825,11 @@ it('shows key budgets in dollars and links each key to its usage', async () => {
   w.unmount();
 });
 
-it('marks the auto pool as the default model', async () => {
+it('marks the auriga pool as the default model', async () => {
   vi.mocked(relayApi.pools).mockResolvedValue({
     items: [
       {
-        id: 'auto',
+        id: 'auriga',
         enabled: true,
         contextWindow: 0,
         maxOutputTokens: 0,
@@ -843,10 +846,10 @@ it('marks the auto pool as the default model', async () => {
   });
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  expect(w.get('tr[data-pool="auto"]').text()).toContain('默认');
+  expect(w.get('tr[data-pool="auriga"]').text()).toContain('默认');
   await openAuto(w);
   const id = w.get('[name="poolId"]').element as HTMLInputElement;
-  expect(id.value).toBe('auto');
+  expect(id.value).toBe('auriga');
   expect(id.disabled).toBe(true);
   w.unmount();
 });

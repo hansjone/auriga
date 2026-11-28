@@ -54,7 +54,8 @@ func TestAdminPoolListingHonoursPagination(t *testing.T) {
 			t.Fatal("pool cursor did not advance")
 		}
 	}
-	if len(seen) != 5 || pages != 3 {
-		t.Fatalf("pools %d pages %d", len(seen), pages)
+	// EnsureAurigaPool inserts the fixed auriga placeholder alongside the five fixtures.
+	if len(seen) != 6 || pages != 3 || !seen[defaultPoolID] {
+		t.Fatalf("pools %d pages %d seen=%v", len(seen), pages, seen)
 	}
 }

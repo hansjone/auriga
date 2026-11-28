@@ -184,7 +184,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				for _, p := range pools.Items {
-					if p.Enabled && (slices.Contains(k.Models, "*") || slices.Contains(k.Models, p.Id)) {
+					if catalogAllows(k, p) {
 						data = append(data, publicModel(p))
 					}
 					page.After = p.Id
@@ -453,15 +453,34 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, invalid)
 		return
 	}
+	// Keep the caller's model id on the wire (including legacy "auto"); only the
+	// pool lookup uses the canonical auriga id so responses stay caller-visible.
+	poolID := model
+	if model == legacyDefaultPoolID {
+		poolID = defaultPoolID
+	}
 	if v := fields["stream"]; v != nil && json.Unmarshal(v, &stream) != nil {
 		reject(w, invalid)
 		return
 	}
-	if !slices.Contains(key.Models, "*") && !slices.Contains(key.Models, model) {
+	if e := b.EnsureAurigaPool(r.Context(), tenant); e != nil {
+		reject(w, e)
+		return
+	}
+	pool, e := b.loadPool(r.Context(), tenant, poolID)
+	// Hide pool existence from unauthorized keys: missing and forbidden look the same.
+	if e != nil {
+		if errors.Is(e, missing) {
+			e = denied
+		}
+		reject(w, e)
+		return
+	}
+	if !chatAllows(key, pool) {
 		reject(w, denied)
 		return
 	}
-	pool, routes, e := b.poolRoutes(r.Context(), tenant, model)
+	routes, e := b.decryptPoolRoutes(r.Context(), tenant, pool)
 	if e != nil {
 		reject(w, e)
 		return

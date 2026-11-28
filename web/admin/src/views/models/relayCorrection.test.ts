@@ -37,7 +37,7 @@ const provider = {
   hasCredential: true,
 };
 const pool: RelayPool = {
-  id: 'auto',
+  id: 'auriga',
   enabled: true,
   contextWindow: 64000,
   maxOutputTokens: 8192,
@@ -60,7 +60,7 @@ const keyRow = {
   requestsPerMinute: 0,
   maxConcurrency: 0,
   maxInFlightTokens: 0,
-  models: ['auto'],
+  models: ['auriga'],
 };
 const error = (status: number, code: string) =>
   new ApiError({ status, code, title: 'Synthetic failure' });
