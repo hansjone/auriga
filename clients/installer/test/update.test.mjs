@@ -1562,3 +1562,49 @@ test('writeAtomic retries transient EPERM/EBUSY renames and cleans temp files on
   );
   assert.deepEqual(readdirSync(base), ['current.txt']);
 });
+
+test('已排队更新在服务端撤回时 check() 自动清理；重启瞬间遇更高正常版本允许完成切换并入队新版', async (t) => {
+  const f = fixture(t);
+  const v2 = signed({ packageId: f.next.id, version: '2.0.0', sequence: 2 });
+  const v3 = signed({
+    packageId: 'package-3',
+    version: '2.1.0',
+    sequence: 3,
+    minimumVersion: '1.0.0',
+  });
+  let mode = 'v2';
+  const request = async (url) => {
+    if (/\/latest(?:\?|$)/.test(url)) {
+      if (mode === 'withdrawn') return new Response('', { status: 404 });
+      return new Response(JSON.stringify(mode === 'v3' ? v3 : v2));
+    }
+    return new Response('zip');
+  };
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  assert.equal(updater.status().restartRequired, true);
+  assert.equal(updater.status().pendingVersion, '2.0.0');
+
+  // 服务端撤回（404）后，后台 check() 自动清理待装队列
+  mode = 'withdrawn';
+  const afterWithdraw = await updater.check();
+  assert.equal(afterWithdraw.restartRequired, false);
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+
+  // 重新排队 v2，重启瞬间服务端刚发布更高的正常迭代 v2.1.0 -> 允许先完成 v2 切换，并把 v2.1.0 记入 available
+  mode = 'v2';
+  await updater.check();
+  await updater.update();
+  mode = 'v3';
+  const applied = await applyPending(f.root, {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    smoke: () => {},
+    extract: () => f.next.dir,
+  });
+  assert.equal(applied, true);
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(readUpdateState(f.root).available.version, '2.1.0');
+});

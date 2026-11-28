@@ -149,6 +149,14 @@ try {
           : values.enabled === 'false'
             ? false
             : undefined,
+      autoDownload:
+        values['auto-download'] === 'true'
+          ? true
+          : values['auto-download'] === 'false'
+            ? false
+            : undefined,
+      background: values.background === true,
+      autoApply: values['auto-apply'] === true,
     });
   } else {
     console.error(

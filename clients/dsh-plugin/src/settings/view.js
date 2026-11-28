@@ -46,10 +46,12 @@ const messages = {
     checkingUpdate: '正在检查…',
     upToDate: '已是最新版本',
     updateAvailable: '发现新版本',
-    awaitingInstall: '已下载，等待安装',
+    awaitingInstall: '已准备就绪，重启后生效',
     autoCheck: '自动检查更新',
-    autoCheckHint: '有可用更新时在客户端内提示',
-    updateRestart: '下载后请关闭 Auriga DSH，退出时安装，下次启动使用新版。',
+    autoCheckHint: '定期检查新版本',
+    autoDownload: '后台自动下载并预备更新',
+    autoDownloadHint: '发现新版本后自动下载解压，重启即可快速完成更新',
+    updateRestart: '新版本已在后台准备好，重启 Auriga DSH 即可快速切换。',
     platform: '平台',
     aurigaCloud: 'Auriga 云平台',
     address: '云平台地址',
@@ -233,11 +235,14 @@ const messages = {
     checkingUpdate: 'Checking…',
     upToDate: 'You are up to date',
     updateAvailable: 'Update available',
-    awaitingInstall: 'Downloaded — waiting to install',
+    awaitingInstall: 'Ready to install — restart to apply',
     autoCheck: 'Check for updates automatically',
-    autoCheckHint: 'Notify in the client when an update is available',
+    autoCheckHint: 'Periodically check for new versions',
+    autoDownload: 'Download and prepare updates in background',
+    autoDownloadHint:
+      'Automatically download and unpack updates so restarting is fast',
     updateRestart:
-      'After download, close Auriga DSH to install. Reopen to use the new version.',
+      'The new version is prepared in the background. Restart Auriga DSH to switch quickly.',
     platform: 'Platform',
     aurigaCloud: 'Auriga Cloud',
     address: 'Cloud platform address',
@@ -1108,7 +1113,7 @@ export function createSettingsView(
   }
 
   function DesktopUpdateView(
-    /** @type {{t:typeof messages.zh,desktop:any,busy:boolean,currentVersion?:string,onCheck:()=>Promise<void>,onUpdate:()=>Promise<void>,onCancel:()=>Promise<void>,onToggleEnabled:(enabled:boolean)=>Promise<void>,onChangeChannel:(channel:string)=>Promise<void>}} */ {
+    /** @type {{t:typeof messages.zh,desktop:any,busy:boolean,currentVersion?:string,onCheck:()=>Promise<void>,onUpdate:()=>Promise<void>,onCancel:()=>Promise<void>,onToggleEnabled:(enabled:boolean)=>Promise<void>,onToggleAutoDownload:(autoDownload:boolean)=>Promise<void>,onChangeChannel:(channel:string)=>Promise<void>}} */ {
       t,
       desktop,
       busy,
@@ -1117,6 +1122,7 @@ export function createSettingsView(
       onUpdate,
       onCancel,
       onToggleEnabled,
+      onToggleAutoDownload,
       onChangeChannel,
     },
   ) {
@@ -1267,7 +1273,9 @@ export function createSettingsView(
         restartRequired &&
           h(StatusIndicator, {
             tone: 'success',
-            label: t.awaitingInstall,
+            label: desktop.pendingVersion
+              ? `v${desktop.pendingVersion} · ${t.awaitingInstall}`
+              : t.awaitingInstall,
           }),
         (availableVersion || downloading || restartRequired) &&
           h(SettingStatus, null, t.updateRestart),
@@ -1287,6 +1295,17 @@ export function createSettingsView(
             disabled: busy || desktop.confirmationRequired || desktop.required,
             onChange: (/** @type {boolean} */ enabled) =>
               onToggleEnabled(enabled),
+          }),
+        }),
+        h(SettingRow, {
+          label: t.autoDownload,
+          description: t.autoDownloadHint,
+          control: h(SettingSwitch, {
+            'aria-label': t.autoDownload,
+            checked: desktop.autoDownload !== false,
+            disabled: busy || desktop.confirmationRequired,
+            onChange: (/** @type {boolean} */ autoDownload) =>
+              onToggleAutoDownload(autoDownload),
           }),
         }),
         h(SettingRow, {
@@ -2565,6 +2584,11 @@ export function createSettingsView(
             onToggleEnabled: (/** @type {boolean} */ enabled) =>
               run(async () => {
                 await call('auriga/settings/desktop', { enabled });
+                await readState();
+              }),
+            onToggleAutoDownload: (/** @type {boolean} */ autoDownload) =>
+              run(async () => {
+                await call('auriga/settings/desktop', { autoDownload });
                 await readState();
               }),
             onChangeChannel: (/** @type {string} */ channel) =>

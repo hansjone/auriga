@@ -378,6 +378,12 @@ export function createSettingsHandler({
           typeof input.enabled === 'boolean'
         )
           return json(200, updater.configure(input.enabled));
+        if (
+          Object.keys(input ?? {}).join(',') === 'autoDownload' &&
+          typeof input.autoDownload === 'boolean' &&
+          typeof updater.setAutoDownload === 'function'
+        )
+          return json(200, updater.setAutoDownload(input.autoDownload));
         if (Object.keys(input ?? {}).join(',') === 'channel')
           return json(200, updater.setChannel(input.channel));
         if (Object.keys(input ?? {}).join(',') !== 'action')

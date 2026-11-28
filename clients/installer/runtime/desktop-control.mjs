@@ -25,6 +25,9 @@ export function desktopInfo(root) {
   );
   const binding = optionalJson(join(root, 'desktop-origin.json'));
   const update = optionalJson(join(root, 'desktop-update.json')) ?? {};
+  const pendingRelease = optionalJson(
+    join(root, 'desktop-pending', 'release.json'),
+  );
   const envelopeVersion = (envelope) =>
     typeof envelope?.version === 'string' ? envelope.version : null;
   return {
@@ -53,6 +56,7 @@ export function desktopInfo(root) {
     ),
     update: {
       enabled: update.enabled !== false,
+      autoDownload: update.autoDownload !== false,
       channel: update.channel ?? 'stable',
       phase: update.phase ?? 'idle',
       available: envelopeVersion(update.available),
@@ -66,6 +70,8 @@ export function desktopInfo(root) {
       applyFailures: update.applyRetry?.failures ?? 0,
       lastCheckedAt: update.lastCheckedAt ?? null,
       restartRequired: existsSync(join(root, 'desktop-pending')),
+      pendingVersion: envelopeVersion(pendingRelease),
+      prepared: existsSync(join(root, 'desktop-pending', 'prepared.json')),
     },
   };
 }
@@ -110,6 +116,7 @@ export function desktopUpdater(
 
 const summary = (status) => ({
   enabled: status.enabled,
+  autoDownload: status.autoDownload,
   channel: status.channel,
   available:
     typeof status.available?.version === 'string'
@@ -125,6 +132,8 @@ const summary = (status) => ({
   manualRetryRequired: status.manualRetryRequired,
   applyFailures: status.applyFailures,
   restartRequired: status.restartRequired,
+  pendingVersion: status.pendingVersion ?? null,
+  prepared: Boolean(status.prepared),
 });
 
 /** Tray commands for checking, preparing and approving signed updates. */
@@ -133,6 +142,9 @@ export async function updateCommand(
   action,
   {
     enabled,
+    autoDownload,
+    background = false,
+    autoApply = false,
     print = (value) => console.log(JSON.stringify(value)),
     ...options
   } = {},
@@ -144,14 +156,18 @@ export async function updateCommand(
   }
   if (action === 'configure') {
     const updater = desktopUpdater(root, options);
-    print(summary(updater.configure(enabled)));
+    let status = updater.status();
+    if (typeof enabled === 'boolean') status = updater.configure(enabled);
+    if (typeof autoDownload === 'boolean')
+      status = updater.setAutoDownload(autoDownload);
+    print(summary(status));
     return;
   }
   let last = 0;
   let lastKey = '';
   const updater = desktopUpdater(root, {
     ...options,
-    requireApproval: action === 'download',
+    requireApproval: action === 'download' && !autoApply,
     onState: (state) => {
       if (action !== 'download') return;
       const key = `${state.phase ?? ''}\0${state.stage ?? ''}`;
@@ -174,7 +190,7 @@ export async function updateCommand(
     return;
   }
   if (action !== 'download') throw new Error('unknown update action');
-  if (updater.status().restartRequired) {
+  if (updater.status().restartRequired && !updater.status().available) {
     print({ ...summary(updater.status()), queued: true });
     return;
   }
@@ -183,6 +199,6 @@ export async function updateCommand(
     print(summary(updater.status()));
     return;
   }
-  const result = await updater.update();
+  const result = await updater.update({ background });
   print({ ...summary(updater.status()), queued: Boolean(result.queued) });
 }

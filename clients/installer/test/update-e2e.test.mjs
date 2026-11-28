@@ -210,3 +210,155 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     'old-python',
   );
 });
+
+test('后台预备 versions/<id>、多次发版单槽位覆盖清理、重启瞬间新版放行与损坏回退', async (t) => {
+  const base = tempBase(t),
+    root = join(base, 'install'),
+    dataHome = join(base, 'data');
+  const v1 = buildPayload(base, { name: 'v1', pythonContent: 'py-v1' });
+  const v2 = buildPayload(base, {
+    name: 'v2',
+    pluginVersion: '2.0.0',
+    pythonContent: 'py-v2',
+  });
+  const v3 = buildPayload(base, {
+    name: 'v3',
+    pluginVersion: '3.0.0',
+    pythonContent: 'py-v3',
+  });
+  const keys = generateKeyPairSync('ed25519'),
+    keyFile = join(base, 'offline-key.pem');
+  writeFileSync(
+    keyFile,
+    keys.privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    { mode: 0o600 },
+  );
+  const pack = (payload, name, sequence) => {
+    const stage = join(base, `stage-${name}`);
+    mkdirSync(stage);
+    cpSync(payload.dir, join(stage, 'payload'), { recursive: true });
+    const zip = join(base, `desktop-${name}.zip`);
+    writeStageZip(stage, zip);
+    wrapSetupFixture(zip);
+    const signingOptions = {
+      payload: payload.dir,
+      archive: zip,
+      keyFile,
+      sequence,
+      publishedAt: new Date(Date.now() - 1000).toISOString(),
+      minimumVersion: '1.0.0',
+      notAfter: new Date(Date.now() + 86400000).toISOString(),
+      platform: hostDesktopTarget(),
+    };
+    const manifest = signRelease({
+      ...signingOptions,
+      confirmSha256: reviewRelease(signingOptions).summary.reviewSha256,
+    });
+    return { zip, manifest };
+  };
+  const pkg2 = pack(v2, 'v2', 2);
+  const pkg3 = pack(v3, 'v3', 3);
+  let activePkg = pkg2;
+  let failDownload = false;
+  const server = createServer((req, res) => {
+    res.setHeader('Connection', 'close');
+    if (/\/latest(?:\?|$)/.test(req.url ?? '')) {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(activePkg.manifest));
+      return;
+    }
+    if (failDownload) {
+      res.writeHead(503);
+      res.end();
+      return;
+    }
+    res.end(readFileSync(activePkg.zip));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = server.address().port;
+  const request = (url, init) =>
+    fetch(`http://127.0.0.1:${port}${new URL(url).pathname}`, init);
+
+  install({
+    root,
+    dataHome,
+    payload: v1.dir,
+    platformOrigin: 'https://example.com',
+    smoke: () => {},
+  });
+  const updater = createUpdater({
+    root,
+    origin: 'https://example.com',
+    request,
+    publicKey: keys.publicKey,
+    smoke: () => {},
+  });
+  assert.equal(updater.status().autoDownload, true);
+  updater.setAutoDownload(false);
+  assert.equal(updater.status().autoDownload, false);
+  updater.setAutoDownload(true);
+  assert.equal(updater.status().autoDownload, true);
+
+  // 1. 后台下载并预备 v2：versions/<v2.id> 提前落盘
+  await updater.check();
+  assert.equal(updater.status().available.version, '2.0.0');
+  const r2 = await updater.update({ background: true });
+  assert.equal(r2.queued, true);
+  assert.equal(r2.prepared, true);
+  assert.equal(existsSync(versionDir(root, v2.id)), true);
+  assert.equal(
+    existsSync(join(root, 'desktop-pending', 'prepared.json')),
+    true,
+  );
+  assert.equal(updater.status().pendingVersion, '2.0.0');
+  assert.equal(readState(root).current, v1.id);
+
+  // 2. 用户未重启期间服务端发布 v3：check() 照常发现 v3
+  activePkg = pkg3;
+  await updater.check();
+  assert.equal(updater.status().available.version, '3.0.0');
+  assert.equal(updater.status().restartRequired, true);
+  assert.equal(updater.status().pendingVersion, '2.0.0');
+
+  // 3. v3 下载失败时，旧的 v2 预备完好保留
+  failDownload = true;
+  await assert.rejects(updater.update({ background: true }));
+  assert.equal(existsSync(versionDir(root, v2.id)), true);
+  assert.equal(updater.status().pendingVersion, '2.0.0');
+
+  // 4. v3 恢复下载并预备成功：原子覆盖 desktop-pending，旧的未激活 v2 目录被清理
+  failDownload = false;
+  const r3 = await updater.update({ background: true });
+  assert.equal(r3.queued, true);
+  assert.equal(r3.prepared, true);
+  assert.equal(updater.status().pendingVersion, '3.0.0');
+  assert.equal(existsSync(versionDir(root, v3.id)), true);
+  assert.equal(existsSync(versionDir(root, v2.id)), false);
+
+  // 5. 重启时快速路径直接切换，无需重新解压
+  const events = [];
+  assert.equal(
+    await applyPending(root, {
+      publicKey: keys.publicKey,
+      request,
+      smoke: () => {},
+      onState: (e) => events.push(e),
+    }),
+    true,
+  );
+  assert.equal(readState(root).current, v3.id);
+  assert.equal(
+    events.some((e) => e.stage === 'extract'),
+    false,
+    'fast path should skip re-extracting prestaged version',
+  );
+  assert.equal(
+    readFileSync(
+      join(versionDir(root, v3.id), 'runtime/python/python.exe'),
+      'utf8',
+    ),
+    'py-v3',
+  );
+});
