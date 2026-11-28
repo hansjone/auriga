@@ -16,7 +16,7 @@ public final class TokenService
   static final long ACCESS_TTL_SECONDS = Duration.ofDays(3).toSeconds();
 
   /** Installation/service JWT TTL; publishers still refresh periodically for rotation. */
-  static final long INTERNAL_SERVICE_TTL_SECONDS = Duration.ofDays(1).toSeconds();
+  public static final long INTERNAL_SERVICE_TTL_SECONDS = Duration.ofDays(1).toSeconds();
 
   /**
    * Prefer shrinking issued exp by the maximum {@link auriga.common.security.AccessTokenSettings}

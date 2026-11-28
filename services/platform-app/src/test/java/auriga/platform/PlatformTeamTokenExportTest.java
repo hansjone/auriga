@@ -78,7 +78,7 @@ class PlatformTeamTokenExportTest {
     assertThrows(
         IllegalStateException.class,
         () -> PlatformTeamTokenExportConfiguration.fixedIssuer(issuer, "edge"));
-    time.now = time.now.plusSeconds(240);
+    time.now = time.now.plusSeconds(TokenService.INTERNAL_SERVICE_TTL_SECONDS - 60);
     String rotated = gateway.issue("edge", gatewaySecret);
     assertNotEquals(first, rotated);
     time.now = time.now.plusSeconds(61);
